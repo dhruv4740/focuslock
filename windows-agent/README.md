@@ -1,50 +1,50 @@
 # FocusLock Windows Desktop Agent
 
-Tracks active foreground processes on Windows and enforces FocusLock policy beyond browser-only controls.
+Electron agent that enforces FocusLock policy on Windows. It talks to Firebase
+Firestore directly (no local backend, no browser extension) and shares one
+account with the Android app via a **sync code** (see the repo root README).
 
 ## What it does
 
-- Detects active target process names from backend policy (`targetApps`)
-- Posts usage sessions to backend `/events`
-- Requests intervention decisions from backend `/interventions/evaluate`
-- For hard blocks:
-  - force closes target process,
-  - shows full-screen lock prompt,
-  - allows one-time extension request via backend,
-  - keeps re-enforcing if blocked target is reopened
-- For reminders:
-  - shows reminder popup
+- Watches the active foreground window (`active-win`) and matches it against the
+  policy's `targetApps` (process names) and `targetDomains` (browser URLs).
+- Enforces the daily limit, focus sessions, and scheduled block windows: for a
+  blocked target it **closes the browser tab** (Ctrl+W via PostMessage) or
+  **terminates the app** (`taskkill`).
+- Receives policy / usage / focus-session changes through Firestore realtime
+  listeners and records daily streak outcomes at local midnight.
+- Provides a tray app + dashboard (Settings, rules, todos, focus sessions,
+  weekly usage, streak).
 
 ## Setup
 
-1. Ensure backend is running on `http://localhost:4050`.
-2. In this folder run:
-   - `npm install`
-   - `npm start`
+1. `npm install`
+2. `npm start` (launches the Electron app; it lives in the system tray)
+3. In **Settings**, set your **Sync Code** (same code as your phone), configure
+   policy, and keep it running.
 
 ## Startup on login
 
-- Install startup task: `npm run install-startup`
-- Remove startup task: `npm run remove-startup`
+- Install: `npm run install-startup`
+- Remove: `npm run remove-startup`
 
-## Target profiles
+## Target profiles (local target presets)
 
-- List profiles: `npm run profile:list`
-- Set active profile: `npm run profile:set -- social-only`
+- List: `npm run profile:list`
+- Set: `npm run profile:set -- social-only`
 
 ## Focus session commands
 
-- Start focus session (minutes): `npm run focus:start -- 25`
-- Stop focus session: `npm run focus:stop`
-- Check focus session: `npm run focus:status`
+- Start (minutes): `npm run focus:start -- 25`
+- Stop: `npm run focus:stop`
+- Status: `npm run focus:status`
 
-## Optional environment overrides
+## Environment overrides
 
-- `FOCUSLOCK_API_BASE`
-- `FOCUSLOCK_USER_ID`
-- `FOCUSLOCK_DEVICE_ID`
+- `FOCUSLOCK_USER_ID` — override the sync code (otherwise read from
+  `config/settings.json`, which the Settings tab writes).
 
 ## Notes
 
-- Run agent with normal or elevated rights depending on whether target processes require elevated termination.
-- This agent complements the browser extension; both can run together.
+- Run with the rights needed to terminate your target processes (elevated only
+  if a target itself runs elevated).
