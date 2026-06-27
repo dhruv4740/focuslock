@@ -32,6 +32,9 @@ const elements = {
   todoList: document.getElementById('todo-list'),
 
   // Settings
+  inputSyncId: document.getElementById('input-sync-id'),
+  btnSaveSyncId: document.getElementById('btn-save-sync-id'),
+  syncSavedMsg: document.getElementById('sync-saved-msg'),
   inputDailyLimit: document.getElementById('input-daily-limit'),
   inputExtensionMins: document.getElementById('input-extension-mins'),
   inputExtensionLimit: document.getElementById('input-extension-limit'),
@@ -51,6 +54,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupFocusSession();
   setupRulesEditor();
   setupTodoChecklist();
+  setupSyncCode();
   setupSettings();
 
   refreshData();
@@ -265,6 +269,25 @@ async function refreshTodos() {
     li.appendChild(leftDiv);
     li.appendChild(delBtn);
     elements.todoList.appendChild(li);
+  });
+}
+
+// ── Sync Code ─────────────────────────────────────────────────────────────────
+
+function setupSyncCode() {
+  if (!elements.inputSyncId) return;
+  window.electronAPI.getSyncId()
+    .then(id => { elements.inputSyncId.value = id || ''; })
+    .catch(() => {});
+
+  elements.btnSaveSyncId?.addEventListener('click', async () => {
+    const raw = elements.inputSyncId.value.trim();
+    if (!raw) return;
+    elements.btnSaveSyncId.disabled = true;
+    elements.btnSaveSyncId.textContent = 'Restarting…';
+    flashSaveMsg(elements.syncSavedMsg);
+    // The app relaunches itself once the new code is persisted.
+    await window.electronAPI.setSyncId(raw);
   });
 }
 

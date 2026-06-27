@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   getSystemStatus: () => ipcRenderer.invoke('get-system-status'),
   getLocalIp: () => ipcRenderer.invoke('get-local-ip'),
+  getSyncId: () => ipcRenderer.invoke('get-sync-id'),
+  setSyncId: (id) => ipcRenderer.invoke('set-sync-id', id),
   runFirewallFix: () => ipcRenderer.invoke('run-firewall-fix'),
   getPolicy: () => ipcRenderer.invoke('get-policy'),
   updatePolicy: (policy) => ipcRenderer.invoke('update-policy', policy),

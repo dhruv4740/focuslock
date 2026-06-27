@@ -210,6 +210,20 @@
       <div id="tab-settings" class="tab-panel">
         <h1 class="panel-title">Settings</h1>
 
+        <!-- Sync Code -->
+        <div class="card full-width" style="margin-bottom: 24px;">
+          <h3>Sync Code</h3>
+          <p class="status-desc">Use the same code here and in the phone app to keep this PC in sync. A different person should pick their own code so their data stays separate. Saving restarts the app.</p>
+          <div class="settings-grid">
+            <div class="settings-row">
+              <label for="input-sync-id">Account sync code</label>
+              <input type="text" id="input-sync-id" placeholder="e.g. dhruv-01" autocomplete="off" spellcheck="false" style="max-width: 260px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border, #333); background: var(--surface, #1e1e2e); color: var(--text-main, #eee); font-size: 0.9rem;">
+            </div>
+          </div>
+          <button id="btn-save-sync-id" class="btn-primary" style="margin-top: 16px;">Save &amp; Restart</button>
+          <span id="sync-saved-msg" class="save-msg hidden">Saved ✓</span>
+        </div>
+
         <!-- Limits -->
         <div class="card full-width" style="margin-bottom: 24px;">
           <h3>Daily Limits</h3>

@@ -2,8 +2,10 @@ import { app, BrowserWindow, ipcMain, Tray, Menu } from 'electron';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import { readFileSync, writeFileSync } from 'fs';
 import { spawn, exec } from 'child_process';
 import { startAgent, stopAgent, getAgentState } from './agent.js';
+import { SETTINGS_PATH, sanitizeSyncId, USER_ID } from './firebase.js';
 import * as api from './api.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -176,6 +178,35 @@ ipcMain.handle('run-firewall-fix', async () => {
   } catch (error) {
     return { success: false, error: error.message };
   }
+});
+
+ipcMain.handle('get-sync-id', () => {
+  try {
+    const cfg = JSON.parse(readFileSync(SETTINGS_PATH, 'utf8'));
+    if (cfg && typeof cfg.syncId === 'string' && cfg.syncId.trim()) {
+      return sanitizeSyncId(cfg.syncId);
+    }
+  } catch {
+    // no settings file yet
+  }
+  return USER_ID; // reflects env override or default
+});
+
+ipcMain.handle('set-sync-id', (event, raw) => {
+  const clean = sanitizeSyncId(raw);
+  try {
+    writeFileSync(SETTINGS_PATH, JSON.stringify({ syncId: clean }, null, 2), 'utf8');
+  } catch (error) {
+    return { error: error.message };
+  }
+  // Relaunch so firebase.js re-resolves USER_ID and the agent re-subscribes to
+  // the new user's documents. Delay slightly so this IPC response is delivered.
+  setTimeout(() => {
+    app.isQuitting = true;
+    app.relaunch();
+    app.exit(0);
+  }, 600);
+  return { syncId: clean };
 });
 
 ipcMain.handle('get-policy', async () => {

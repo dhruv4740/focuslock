@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { initializeApp } from "firebase/app";
 import {
   getFirestore,
@@ -31,9 +33,37 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// USER_ID can be overridden via environment variable when multi-user support
-// is added. Keep the default consistent with the Android side.
-const USER_ID = process.env.FOCUSLOCK_USER_ID ?? "user_default";
+// Persisted sync code lives next to the other config so it survives restarts
+// and works in both the Electron app and the standalone `node agent.js` CLI.
+const SETTINGS_PATH = fileURLToPath(new URL("../config/settings.json", import.meta.url));
+
+// Must match FocusPolicyClient.sanitizeSyncId on Android so the same human
+// input resolves to the same Firestore doc id on both platforms.
+function sanitizeSyncId(raw) {
+  let clean = String(raw ?? "").trim().toLowerCase();
+  clean = clean.replace(/[^a-z0-9_-]/g, "-");
+  clean = clean.replace(/-+/g, "-");
+  clean = clean.replace(/^-+|-+$/g, "");
+  if (!clean) return "user_default";
+  return clean.slice(0, 64);
+}
+
+// Precedence: env override → settings.json → default. Each person sets the same
+// code on their phone + desktop; different people stay isolated.
+function loadUserId() {
+  if (process.env.FOCUSLOCK_USER_ID) return sanitizeSyncId(process.env.FOCUSLOCK_USER_ID);
+  try {
+    const cfg = JSON.parse(readFileSync(SETTINGS_PATH, "utf8"));
+    if (cfg && typeof cfg.syncId === "string" && cfg.syncId.trim()) {
+      return sanitizeSyncId(cfg.syncId);
+    }
+  } catch {
+    // no settings file yet — first run
+  }
+  return "user_default";
+}
+
+const USER_ID = loadUserId();
 
 export {
   db,
@@ -50,5 +80,7 @@ export {
   query,
   orderBy,
   limit,
-  USER_ID
+  USER_ID,
+  SETTINGS_PATH,
+  sanitizeSyncId
 };
