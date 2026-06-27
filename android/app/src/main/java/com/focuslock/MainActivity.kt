@@ -24,6 +24,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import com.focuslock.data.FocusPolicyClient
 import com.focuslock.data.FocusPolicyClient.PolicyData
+import com.focuslock.update.UpdateChecker
 import com.focuslock.receiver.PolicyDeviceAdminReceiver
 import com.focuslock.security.EnforcementChecks
 import com.focuslock.service.UsageMonitorService
@@ -136,6 +137,7 @@ class MainActivity : AppCompatActivity() {
 
         refreshProtectionStatus()
         refreshDashboardData()
+        UpdateChecker.checkForUpdate(this)
     }
 
     // ── Focus Session ─────────────────────────────────────────────────────────
