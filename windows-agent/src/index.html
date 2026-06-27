@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>FocusLock Desktop Dashboard</title>
+  <link rel="stylesheet" href="index.css">
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <script defer src="renderer.js"></script>
+  <style>
+    .duration-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 8px; }
+    .chip { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border, #333); background: transparent; color: var(--text-main, #eee); cursor: pointer; font-size: 0.85rem; }
+    .chip.active { background: var(--accent, #6c63ff); border-color: var(--accent, #6c63ff); color: #fff; }
+    .chip-input { width: 80px; padding: 6px 10px; border-radius: 20px; border: 1px solid var(--border, #333); background: transparent; color: var(--text-main, #eee); font-size: 0.85rem; text-align: center; }
+    .streak-display { display: flex; align-items: baseline; gap: 8px; margin: 12px 0 4px; }
+    .streak-num { font-size: 2.8rem; font-weight: 700; color: var(--accent, #6c63ff); }
+    .streak-label { font-size: 1rem; color: var(--text-muted, #aaa); }
+    .streak-meta { font-size: 0.85rem; color: var(--text-muted, #aaa); }
+    .settings-grid { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+    .settings-row { display: flex; flex-direction: column; gap: 6px; }
+    .settings-row label { font-size: 0.85rem; color: var(--text-muted, #aaa); }
+    .settings-row input[type="number"] { max-width: 160px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border, #333); background: var(--surface, #1e1e2e); color: var(--text-main, #eee); font-size: 0.9rem; }
+    .save-msg { margin-left: 12px; color: #2ecc71; font-size: 0.85rem; }
+    .day-chip { display: flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--text-muted, #aaa); cursor: pointer; }
+  </style>
+</head>
+<body>
+  <!-- Custom Sleek Titlebar -->
+  <div id="titlebar">
+    <div class="logo-area">
+      <img src="../config/icon.png" class="logo-icon" alt="Logo">
+      <span class="logo-text">FocusLock</span>
+    </div>
+    <div class="drag-region"></div>
+    <div class="window-controls">
+      <button id="btn-minimize" class="control-btn">&#9472;</button>
+      <button id="btn-close" class="control-btn">&#10005;</button>
+    </div>
+  </div>
+
+  <div id="app-container">
+    <!-- Sidebar Navigation -->
+    <div id="sidebar">
+      <div class="nav-items">
+        <button class="nav-btn active" data-tab="tab-dashboard">
+          <span class="nav-icon">📊</span> Dashboard
+        </button>
+
+        <button class="nav-btn" data-tab="tab-rules">
+          <span class="nav-icon">🛡️</span> Blocked Rules
+        </button>
+        <button class="nav-btn" data-tab="tab-todos">
+          <span class="nav-icon">✅</span> Shared Tasks
+        </button>
+        <button class="nav-btn" data-tab="tab-settings">
+          <span class="nav-icon">⚙️</span> Settings
+        </button>
+      </div>
+      <div class="sidebar-footer">
+        <span class="status-indicator online"></span>
+        <span class="status-label">Agent Active</span>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div id="main-content">
+      <!-- Tab: Dashboard -->
+      <div id="tab-dashboard" class="tab-panel active">
+        <h1 class="panel-title">Overview</h1>
+        
+        <div class="card-grid">
+          <!-- Focus Session Card -->
+          <div class="card gradient-card">
+            <h3>Active Focus Protection</h3>
+            <p class="status-desc">System-wide monitoring is running in the background.</p>
+            <div class="focus-timer-box">
+              <span id="focus-countdown" class="countdown-large">Focus Inactive</span>
+            </div>
+            <!-- Duration preset chips -->
+            <div id="focus-duration-row" class="duration-chips">
+              <button class="chip active" data-mins="25">25 min</button>
+              <button class="chip" data-mins="45">45 min</button>
+              <button class="chip" data-mins="90">90 min</button>
+              <input id="input-custom-duration" type="number" min="1" max="480" placeholder="Custom" class="chip-input">
+            </div>
+            <div class="action-row">
+              <button id="btn-start-focus" class="btn-primary">Start Focus</button>
+              <button id="btn-stop-focus" class="btn-secondary hidden">Stop Focus</button>
+            </div>
+          </div>
+
+          <!-- Streak Card -->
+          <div class="card">
+            <h3>🔥 Focus Streak</h3>
+            <p class="status-desc">Days under your daily limit in a row.</p>
+            <div class="streak-display">
+              <span id="streak-current" class="streak-num">—</span>
+              <span class="streak-label">day streak</span>
+            </div>
+            <div class="streak-meta">
+              Best: <strong id="streak-longest">—</strong> days
+            </div>
+          </div>
+        </div>
+
+        <!-- Analytics Card -->
+        <div class="card full-width" style="margin-top: 24px; margin-bottom: 24px;">
+          <div class="analytics-header">
+            <h3>📊 Distraction Insights</h3>
+            <p class="status-desc" style="margin-bottom: 0;">Today's usage time and blocked apps.</p>
+          </div>
+          <div class="analytics-grid" style="margin-top: 20px;">
+            <div class="stat-summary-box">
+              <div class="stat-item">
+                <span class="stat-num" id="stat-time-spent">0</span>
+                <span class="stat-label">Min Spent Today</span>
+              </div>
+              <div style="height: 1px; background: var(--border); margin: 12px 0; width: 100%;"></div>
+              <div class="stat-item">
+                <span class="stat-num" id="stat-focus-time">0</span>
+                <span class="stat-label">Tasks Completed</span>
+              </div>
+            </div>
+            <div class="chart-container">
+              <h4 style="font-size: 0.95rem; margin-bottom: 12px; color: var(--text-main);">Time Spent per Target (min)</h4>
+              <div id="chart-bars" class="chart-bars-list">
+                <div class="empty-chart-msg">No usage tracked today. Keep focusing!</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Weekly Usage Chart -->
+        <div class="card full-width" style="margin-bottom: 24px;">
+          <h3>📅 7-Day Usage History</h3>
+          <p class="status-desc">Minutes spent on tracked apps per day this week.</p>
+          <div id="weekly-chart" class="chart-bars-list" style="margin-top: 16px;">
+            <div class="empty-chart-msg">Loading…</div>
+          </div>
+        </div>
+
+        <!-- Help Info Box -->
+        <div class="info-banner">
+          <span class="info-icon">ℹ️</span>
+          <div class="info-text">
+            <h4>No Extension Required</h4>
+            <p>FocusLock monitors active window titles system-wide and automatically shuts down matching tabs across all browsers.</p>
+          </div>
+        </div>
+      </div>
+
+
+
+      <!-- Tab: Rules Editor -->
+      <div id="tab-rules" class="tab-panel">
+        <h1 class="panel-title">System Block Rules</h1>
+        
+        <div class="card full-width">
+          <h3>Blocked Domains & Apps</h3>
+          <p class="status-desc">Add websites or apps that you want to block when your limit is reached or when a Focus Session is active.</p>
+
+          <div class="rule-inputs">
+            <input type="text" id="input-new-rule" placeholder="e.g. instagram.com, steam.exe, youtube.com/shorts">
+            <select id="select-rule-type">
+              <option value="domain">Website (Domain/Path)</option>
+              <option value="app">Desktop App (Process)</option>
+            </select>
+            <button id="btn-add-rule" class="btn-primary">Add Block Rule</button>
+          </div>
+
+          <div class="rules-container">
+            <div class="rule-section">
+              <h4>Blocked Websites (System-wide)</h4>
+              <ul id="list-blocked-domains" class="rule-list">
+                <!-- Dynamic -->
+              </ul>
+            </div>
+            <div class="rule-section">
+              <h4>Blocked Desktop Processes</h4>
+              <ul id="list-blocked-apps" class="rule-list">
+                <!-- Dynamic -->
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Shared Checklist -->
+      <div id="tab-todos" class="tab-panel">
+        <h1 class="panel-title">Shared Tasks</h1>
+
+        <div class="card full-width">
+          <h3>Shared Task Checklist</h3>
+          <p class="status-desc">These tasks sync automatically between your phone and laptop in real-time. Toggling a task here updates your phone screen instantly.</p>
+
+          <div class="todo-inputs">
+            <input type="text" id="input-new-todo" placeholder="Add a mindful task you need to complete...">
+            <button id="btn-add-todo" class="btn-primary">Add Task</button>
+          </div>
+
+          <ul id="todo-list" class="todo-items-list">
+            <!-- Dynamic -->
+          </ul>
+        </div>
+      </div>
+
+      <!-- Tab: Settings -->
+      <div id="tab-settings" class="tab-panel">
+        <h1 class="panel-title">Settings</h1>
+
+        <!-- Limits -->
+        <div class="card full-width" style="margin-bottom: 24px;">
+          <h3>Daily Limits</h3>
+          <p class="status-desc">How much time is allowed per day on tracked apps before blocking kicks in.</p>
+          <div class="settings-grid">
+            <div class="settings-row">
+              <label for="input-daily-limit">Daily limit (minutes, 0 = no limit)</label>
+              <input type="number" id="input-daily-limit" min="0" max="1440" placeholder="e.g. 60">
+            </div>
+            <div class="settings-row">
+              <label for="input-extension-mins">Extension duration (minutes per extension)</label>
+              <input type="number" id="input-extension-mins" min="1" max="120" placeholder="e.g. 15">
+            </div>
+            <div class="settings-row">
+              <label for="input-extension-limit">Max extensions per day</label>
+              <input type="number" id="input-extension-limit" min="0" max="10" placeholder="e.g. 1">
+            </div>
+            <div class="settings-row">
+              <label for="chk-hard-block">Hard block after limit (no extension possible)</label>
+              <input type="checkbox" id="chk-hard-block" style="width: auto;">
+            </div>
+          </div>
+          <button id="btn-save-limits" class="btn-primary" style="margin-top: 16px;">Save Limits</button>
+          <span id="limits-saved-msg" class="save-msg hidden">Saved ✓</span>
+        </div>
+
+        <!-- Scheduled Block Windows -->
+        <div class="card full-width">
+          <h3>Scheduled Block Windows</h3>
+          <p class="status-desc">Block all tracked apps during specific time windows (e.g. work hours). Acts like a focus session for that window.</p>
+
+          <div class="rule-inputs" style="gap: 8px; flex-wrap: wrap;">
+            <input type="time" id="input-window-start" value="09:00">
+            <span style="align-self:center; color: var(--text-muted);">to</span>
+            <input type="time" id="input-window-end" value="17:00">
+            <div style="display: flex; gap: 6px; align-self: center; flex-wrap: wrap;" id="day-checkboxes">
+              <label class="day-chip"><input type="checkbox" value="1" checked> Mon</label>
+              <label class="day-chip"><input type="checkbox" value="2" checked> Tue</label>
+              <label class="day-chip"><input type="checkbox" value="3" checked> Wed</label>
+              <label class="day-chip"><input type="checkbox" value="4" checked> Thu</label>
+              <label class="day-chip"><input type="checkbox" value="5" checked> Fri</label>
+              <label class="day-chip"><input type="checkbox" value="6"> Sat</label>
+              <label class="day-chip"><input type="checkbox" value="0"> Sun</label>
+            </div>
+            <button id="btn-add-window" class="btn-primary">Add Window</button>
+          </div>
+
+          <ul id="list-block-windows" class="rule-list" style="margin-top: 16px;">
+            <!-- Dynamic -->
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

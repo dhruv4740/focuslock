@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FA121820"
+    android:clickable="true"
+    android:focusable="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:gravity="center">
+
+        <!-- Top Icon/App Indicator -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Locked"
+            android:textColor="@color/color_danger"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textAllCaps="true"
+            android:letterSpacing="0.15"
+            android:background="@drawable/card_background"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="4dp"
+            android:layout_marginBottom="16dp" />
+
+        <!-- Title -->
+        <TextView
+            android:id="@+id/txtOverlayTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="FocusLock is active"
+            android:textColor="@color/text_primary"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Today's Stats Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/card_background"
+            android:padding="16dp"
+            android:layout_marginBottom="20dp"
+            android:gravity="center">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="TODAY'S USAGE"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:id="@+id/txtOverlayStats"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Loading today's stats..."
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:gravity="center" />
+        </LinearLayout>
+
+        <!-- Quote Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/card_background"
+            android:padding="16dp"
+            android:layout_marginBottom="24dp"
+            android:gravity="center">
+
+            <TextView
+                android:id="@+id/txtOverlayQuote"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="&quot;Your focus determines your reality.&quot;"
+                android:textColor="@color/color_primary"
+                android:textSize="15sp"
+                android:textStyle="italic"
+                android:gravity="center" />
+        </LinearLayout>
+
+        <!-- Math Challenge Container (Friction Gate for Extension) -->
+        <LinearLayout
+            android:id="@+id/layoutExtensionMath"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/card_background"
+            android:padding="16dp"
+            android:layout_marginBottom="16dp"
+            android:gravity="center"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Solve to verify intention:"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/txtExtensionMathQuestion"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="15 + 16 = ?"
+                android:textColor="@color/color_accent"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <EditText
+                    android:id="@+id/edtExtensionMathAnswer"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:hint="Answer"
+                    android:textColorHint="@color/text_secondary"
+                    android:textColor="@color/text_primary"
+                    android:background="@drawable/edittext_background"
+                    android:padding="10dp"
+                    android:textSize="15sp"
+                    android:gravity="center"
+                    android:inputType="number"
+                    android:layout_marginEnd="8dp" />
+
+                <Button
+                    android:id="@+id/btnExtensionMathVerify"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/button_primary"
+                    android:text="Submit"
+                    android:textColor="@color/bg_dark"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Main Buttons -->
+        <Button
+            android:id="@+id/btnOverlayRequestExtension"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/button_secondary"
+            android:text="Request 5 Minute Extension"
+            android:textColor="@color/text_primary"
+            android:layout_marginBottom="10dp" />
+
+        <Button
+            android:id="@+id/btnOverlayClose"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/button_primary"
+            android:text="I will take a break now"
+            android:textColor="@color/bg_dark"
+            android:textStyle="bold"
+            android:layout_marginBottom="16dp" />
+
+        <!-- Status & Countdown text -->
+        <TextView
+            android:id="@+id/txtOverlayStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp"
+            android:gravity="center" />
+
+    </LinearLayout>
+</FrameLayout>

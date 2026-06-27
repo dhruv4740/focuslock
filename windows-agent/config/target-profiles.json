@@ -1,0 +1,16 @@
+{
+  "social-only": [],
+  "social-and-games": [
+    "steam.exe",
+    "epicgameslauncher.exe",
+    "valorant.exe",
+    "riotclientservices.exe"
+  ],
+  "deep-work": [
+    "steam.exe",
+    "epicgameslauncher.exe",
+    "valorant.exe",
+    "riotclientservices.exe",
+    "discord.exe"
+  ]
+}

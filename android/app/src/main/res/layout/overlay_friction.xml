@@ -1,0 +1,549 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FA121820"
+    android:clickable="true"
+    android:focusable="true">
+
+    <!-- Main Content Container with Padding -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:gravity="center_horizontal">
+
+        <!-- Top Header Info -->
+        <TextView
+            android:id="@+id/txtFrictionHeader"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="Mindful Pause"
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textAllCaps="true"
+            android:letterSpacing="0.1" />
+
+        <!-- Step Container -->
+        <FrameLayout
+            android:id="@+id/stepContainer"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="20dp">
+
+            <!-- STEP 1: BREATHING EXERCISE -->
+            <LinearLayout
+                android:id="@+id/layoutStepBreathing"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="visible">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Let's take a breath before opening this app."
+                    android:textColor="@color/text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginBottom="40dp" />
+
+                <!-- Breathing circle container to support scaling -->
+                <FrameLayout
+                    android:layout_width="200dp"
+                    android:layout_height="200dp"
+                    android:layout_gravity="center"
+                    android:layout_marginBottom="40dp">
+
+                    <View
+                        android:id="@+id/viewBreathingCircle"
+                        android:layout_width="120dp"
+                        android:layout_height="120dp"
+                        android:layout_gravity="center"
+                        android:background="@drawable/breathing_circle" />
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/txtBreathingAction"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Inhale..."
+                    android:textColor="@color/color_primary"
+                    android:textSize="28sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:id="@+id/txtBreathingTimer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="6 seconds remaining"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="16sp" />
+
+            </LinearLayout>
+
+            <!-- STEP 2: INTENTION SETTING -->
+            <LinearLayout
+                android:id="@+id/layoutStepIntention"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Why do you want to open this app?"
+                    android:textColor="@color/text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginBottom="24dp" />
+
+                <!-- Intention choices -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginBottom="20dp">
+
+                    <Button
+                        android:id="@+id/btnIntention1"
+                        style="?android:attr/buttonStyleSmall"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/button_secondary"
+                        android:text="Just checking notifications (quick)"
+                        android:textColor="@color/text_primary"
+                        android:layout_marginBottom="8dp" />
+
+                    <Button
+                        android:id="@+id/btnIntention2"
+                        style="?android:attr/buttonStyleSmall"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/button_secondary"
+                        android:text="Need to post/message someone specific"
+                        android:textColor="@color/text_primary"
+                        android:layout_marginBottom="8dp" />
+
+                    <Button
+                        android:id="@+id/btnIntention3"
+                        style="?android:attr/buttonStyleSmall"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/button_secondary"
+                        android:text="Boredom / Dopamine craving"
+                        android:textColor="@color/text_primary"
+                        android:layout_marginBottom="8dp" />
+                </LinearLayout>
+
+                <!-- Custom text input -->
+                <EditText
+                    android:id="@+id/edtCustomIntention"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Or type a custom reason..."
+                    android:textColorHint="@color/text_secondary"
+                    android:textColor="@color/text_primary"
+                    android:background="@drawable/edittext_background"
+                    android:padding="12dp"
+                    android:textSize="15sp"
+                    android:inputType="textCapSentences"
+                    android:layout_marginBottom="24dp" />
+
+                <Button
+                    android:id="@+id/btnIntentionNext"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/button_primary"
+                    android:text="Confirm Intention"
+                    android:textColor="@color/bg_dark"
+                    android:textStyle="bold" />
+
+            </LinearLayout>
+
+            <!-- STEP 3: STATS & TODOS -->
+            <LinearLayout
+                android:id="@+id/layoutStepStatsTodos"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Today's Stats &amp; Tasks"
+                    android:textColor="@color/text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="16dp"
+                    android:layout_gravity="center_horizontal" />
+
+                <!-- Stats Summary -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="16dp"
+                    android:weightSum="2">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:background="@drawable/card_background"
+                        android:padding="12dp"
+                        android:layout_marginEnd="6dp"
+                        android:gravity="center">
+
+                        <TextView
+                            android:id="@+id/txtStatsOpens"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="0 times"
+                            android:textColor="@color/color_accent"
+                            android:textSize="18sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Opened Today"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:background="@drawable/card_background"
+                        android:padding="12dp"
+                        android:layout_marginStart="6dp"
+                        android:gravity="center">
+
+                        <TextView
+                            android:id="@+id/txtStatsDuration"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="0 mins"
+                            android:textColor="@color/color_accent"
+                            android:textSize="18sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Time Spent"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Your Pending Todos:"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="8dp" />
+
+                <!-- Dynamic Scroll Container for Todos -->
+                <ScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/card_background"
+                    android:padding="8dp"
+                    android:layout_marginBottom="16dp">
+
+                    <LinearLayout
+                        android:id="@+id/containerFrictionTodos"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <!-- Will be populated dynamically -->
+                        <TextView
+                            android:id="@+id/txtNoTodosPlaceholder"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="All caught up! No pending tasks."
+                            android:textColor="@color/text_secondary"
+                            android:textSize="14sp"
+                            android:gravity="center"
+                            android:padding="20dp" />
+                    </LinearLayout>
+                </ScrollView>
+
+                <Button
+                    android:id="@+id/btnStatsNext"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/button_primary"
+                    android:text="I Understand, Next"
+                    android:textColor="@color/bg_dark"
+                    android:textStyle="bold" />
+
+            </LinearLayout>
+
+            <!-- STEP 4: MATH CHALLENGE -->
+            <LinearLayout
+                android:id="@+id/layoutStepMath"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Solve to verify your attention:"
+                    android:textColor="@color/text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginBottom="30dp" />
+
+                <TextView
+                    android:id="@+id/txtMathQuestion"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="12 + 15 = ?"
+                    android:textColor="@color/color_accent"
+                    android:textSize="36sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="24dp" />
+
+                <EditText
+                    android:id="@+id/edtMathAnswer"
+                    android:layout_width="150dp"
+                    android:layout_height="wrap_content"
+                    android:hint="Answer"
+                    android:textColorHint="@color/text_secondary"
+                    android:textColor="@color/text_primary"
+                    android:background="@drawable/edittext_background"
+                    android:padding="12dp"
+                    android:textSize="18sp"
+                    android:gravity="center"
+                    android:inputType="number"
+                    android:layout_marginBottom="30dp" />
+
+                <Button
+                    android:id="@+id/btnMathVerify"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/button_primary"
+                    android:text="Verify Answer"
+                    android:textColor="@color/bg_dark"
+                    android:textStyle="bold" />
+
+            </LinearLayout>
+
+            <!-- STEP: WAIT DELAY -->
+            <LinearLayout
+                android:id="@+id/layoutStepDelay"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Please wait to reflect on your action:"
+                    android:textColor="@color/text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginBottom="30dp" />
+
+                <ProgressBar
+                    android:id="@+id/barDelayProgress"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="200dp"
+                    android:layout_height="12dp"
+                    android:layout_marginBottom="24dp"
+                    android:max="100"
+                    android:progress="0" />
+
+                <TextView
+                    android:id="@+id/txtDelaySeconds"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="10 seconds remaining"
+                    android:textColor="@color/color_accent"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- STEP: SHAKE CHALLENGE -->
+            <LinearLayout
+                android:id="@+id/layoutStepShake"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Shake your phone vigorously\nto build willpower!"
+                    android:textColor="@color/text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginBottom="30dp" />
+
+                <ProgressBar
+                    android:id="@+id/barShakeProgress"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="240dp"
+                    android:layout_height="12dp"
+                    android:layout_marginBottom="24dp"
+                    android:max="100"
+                    android:progress="0" />
+
+                <TextView
+                    android:id="@+id/txtShakeStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Shake meter: 0%"
+                    android:textColor="@color/color_accent"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- STEP: COGNITIVE REFLECTION -->
+            <LinearLayout
+                android:id="@+id/layoutStepReflection"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Type this mindful statement exactly:"
+                    android:textColor="@color/text_primary"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginBottom="16dp" />
+
+                <TextView
+                    android:id="@+id/txtReflectionPhrase"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="I am choosing temporary distraction over my long-term goals"
+                    android:textColor="@color/color_primary"
+                    android:textSize="16sp"
+                    android:textStyle="italic"
+                    android:gravity="center"
+                    android:layout_marginBottom="24dp"
+                    android:lineSpacingExtra="4dp" />
+
+                <EditText
+                    android:id="@+id/edtReflectionInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Type the statement here..."
+                    android:textColorHint="@color/text_secondary"
+                    android:textColor="@color/text_primary"
+                    android:background="@drawable/edittext_background"
+                    android:padding="12dp"
+                    android:textSize="15sp"
+                    android:inputType="textNoSuggestions"
+                    android:layout_marginBottom="24dp" />
+
+                <Button
+                    android:id="@+id/btnReflectionVerify"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/button_primary"
+                    android:text="Verify &amp; Continue"
+                    android:textColor="@color/bg_dark"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- STEP 5: FINAL CONFIRMATION -->
+            <LinearLayout
+                android:id="@+id/layoutStepDecision"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Do you still want to proceed?"
+                    android:textColor="@color/text_primary"
+                    android:textSize="22sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginBottom="12dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Taking a break now will help you focus on your goals."
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp"
+                    android:gravity="center"
+                    android:layout_marginBottom="40dp" />
+
+                <Button
+                    android:id="@+id/btnDecisionExit"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/button_primary"
+                    android:text="Yes, Close App &amp; Focus (Recommended)"
+                    android:textColor="@color/bg_dark"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="16dp" />
+
+                <Button
+                    android:id="@+id/btnDecisionProceed"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/button_secondary"
+                    android:text="Open Anyway"
+                    android:textColor="@color/text_primary" />
+
+            </LinearLayout>
+        </FrameLayout>
+
+        <!-- Persistent exit option at the bottom -->
+        <Button
+            android:id="@+id/btnFrictionCancel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@android:color/transparent"
+            android:text="I will take a break now"
+            android:textColor="@color/color_danger"
+            android:textSize="14sp"
+            android:layout_marginBottom="10dp" />
+
+    </LinearLayout>
+</FrameLayout>
