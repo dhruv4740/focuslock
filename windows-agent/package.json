@@ -13,8 +13,7 @@
     "profile:set": "node src/profile-cli.js set",
     "focus:start": "node src/focus-cli.js start",
     "focus:stop": "node src/focus-cli.js stop",
-    "focus:status": "node src/focus-cli.js status",
-    "emergency": "node src/emergency-cli.js"
+    "focus:status": "node src/focus-cli.js status"
   },
   "dependencies": {
     "active-win": "^8.1.0",

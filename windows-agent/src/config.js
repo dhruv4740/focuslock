@@ -1,15 +1,7 @@
-export const API_BASE = process.env.FOCUSLOCK_API_BASE ?? "http://localhost:4050";
-
-export const SETTINGS = {
-  userId: process.env.FOCUSLOCK_USER_ID ?? "local-user",
-  deviceId: process.env.FOCUSLOCK_DEVICE_ID ?? "windows-laptop-1",
-  platform: "windows"
-};
-
+// Poll/evaluate cadence for the active-window monitor loop in agent.js.
+// Policy, usage and focus-session changes arrive via Firestore realtime
+// listeners, so no separate refresh intervals are needed here.
 export const INTERVALS = {
   activeWindowPollMs: 4000,
-  evaluateMs: 15000,
-  policyRefreshMs: 60000,
-  blockPromptCooldownMs: 30000,
-  focusSessionRefreshMs: 60000
+  evaluateMs: 15000
 };
