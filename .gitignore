@@ -2,6 +2,9 @@
 node_modules/
 backend/dist/
 
+# Desktop packaging output (electron-builder)
+windows-agent/dist/
+
 # Android
 .gradle/
 local.properties

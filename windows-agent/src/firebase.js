@@ -1,5 +1,6 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { readFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously } from "firebase/auth";
 import {
@@ -45,9 +46,15 @@ try {
   console.error("[firebase] anonymous auth failed:", String(err));
 }
 
-// Persisted sync code lives next to the other config so it survives restarts
-// and works in both the Electron app and the standalone `node agent.js` CLI.
-const SETTINGS_PATH = fileURLToPath(new URL("../config/settings.json", import.meta.url));
+// Persisted sync code must live OUTSIDE the app's install/extract directory.
+// A packaged Windows build runs from a read-only install (Program Files) or a
+// throwaway temp extraction, so settings written next to the app would fail to
+// save or vanish on the next launch. %APPDATA%/FocusLock persists across
+// updates and works for both the Electron app and the `node agent.js` CLI
+// without needing electron's `app` object (which isn't available in the CLI).
+const CONFIG_DIR = join(process.env.APPDATA || join(homedir(), ".config"), "FocusLock");
+try { mkdirSync(CONFIG_DIR, { recursive: true }); } catch { /* best effort; loadUserId tolerates a missing file */ }
+const SETTINGS_PATH = join(CONFIG_DIR, "settings.json");
 
 // Must match FocusPolicyClient.sanitizeSyncId on Android so the same human
 // input resolves to the same Firestore doc id on both platforms.

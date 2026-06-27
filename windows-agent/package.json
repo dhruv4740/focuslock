@@ -2,11 +2,15 @@
   "name": "focuslock-windows-agent",
   "private": true,
   "type": "module",
+  "version": "0.2.0",
+  "description": "FocusLock desktop focus agent",
+  "author": "FocusLock",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "agent:cli": "node src/agent.js",
     "check": "node --check src/agent.js",
+    "dist": "electron-builder --win nsis",
     "install-startup": "powershell -ExecutionPolicy Bypass -File ./scripts/install-startup-task.ps1",
     "remove-startup": "powershell -ExecutionPolicy Bypass -File ./scripts/remove-startup-task.ps1",
     "profile:list": "node src/profile-cli.js list",
@@ -17,9 +21,32 @@
   },
   "dependencies": {
     "active-win": "^8.1.0",
+    "electron-updater": "^6.3.9",
     "firebase": "^12.13.0"
   },
   "devDependencies": {
-    "electron": "^42.2.0"
+    "electron": "^42.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.focuslock.desktop",
+    "productName": "FocusLock",
+    "asar": false,
+    "npmRebuild": false,
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "OWNER",
+        "repo": "REPO"
+      }
+    ]
   }
 }

@@ -10,6 +10,9 @@ import { readFileSync, writeFileSync } from 'fs';
 import { startAgent, stopAgent, getAgentState } from './agent.js';
 import { SETTINGS_PATH, sanitizeSyncId, USER_ID } from './firebase.js';
 import * as api from './api.js';
+// electron-updater is CommonJS; default-import and destructure under our ESM entry.
+import electronUpdater from 'electron-updater';
+const { autoUpdater } = electronUpdater;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow = null;
@@ -100,6 +103,14 @@ app.whenReady().then(() => {
   startAgent();
   createTray();
   createMainWindow();
+
+  // Self-update from GitHub Releases. The update feed (app-update.yml) only
+  // exists in a packaged build, so skip this when running from source.
+  if (app.isPackaged) {
+    autoUpdater.checkForUpdatesAndNotify().catch((error) => {
+      console.error(`[updater] check failed: ${String(error)}`);
+    });
+  }
 
   // Update tray tooltip with live usage every 30 s
   setInterval(() => {
