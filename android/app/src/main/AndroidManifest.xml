@@ -27,12 +27,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".PermissionWarningActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:theme="@style/Theme.FocusLock" />
-
         <service
             android:name=".service.FocusAccessibilityService"
             android:enabled="true"
