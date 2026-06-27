@@ -22,8 +22,7 @@ object UpdateChecker {
 
     private const val TAG = "UpdateChecker"
 
-    // TODO: set to the published GitHub repo, e.g. "dhruvk/focuslock"
-    private const val GITHUB_REPO = "OWNER/REPO"
+    private const val GITHUB_REPO = "dhruv4740/focuslock"
 
     fun checkForUpdate(activity: Activity) {
         if (GITHUB_REPO == "OWNER/REPO") return

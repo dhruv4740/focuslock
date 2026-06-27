@@ -44,8 +44,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "OWNER",
-        "repo": "REPO"
+        "owner": "dhruv4740",
+        "repo": "focuslock"
       }
     ]
   }
