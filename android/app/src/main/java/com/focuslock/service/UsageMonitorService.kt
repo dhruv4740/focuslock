@@ -34,6 +34,11 @@ class UsageMonitorService : Service() {
         const val ACTION_FOREGROUND_CHANGED = "com.focuslock.ACTION_FOREGROUND_CHANGED"
         const val EXTRA_PACKAGE_NAME = "package_name"
 
+        // True while the monitor service is alive — lets the UI decide whether to
+        // restart it (e.g. after the sync code changes).
+        @Volatile var isServiceActive = false
+            private set
+
         // Cross-service shared state — written only from main thread
         @Volatile var currentForegroundTarget: String? = null
             internal set
@@ -73,6 +78,7 @@ class UsageMonitorService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isServiceActive = true
         FocusPolicyClient.init(this)
         createNotificationChannels()
     }
@@ -107,6 +113,7 @@ class UsageMonitorService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "onDestroy")
+        isServiceActive = false
         isRunning.set(false)
         networkExecutor.shutdownNow()
 

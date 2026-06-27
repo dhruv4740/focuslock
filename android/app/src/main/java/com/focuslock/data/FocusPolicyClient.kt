@@ -13,7 +13,36 @@ import org.json.JSONObject
 object FocusPolicyClient {
 
     private const val TAG = "FocusPolicyClient"
-    private const val USER_ID = "user_default"
+    private const val PREFS_NAME = "FocusLockPrefs"
+    private const val PREF_SYNC_ID = "sync_id"
+    const val DEFAULT_USER_ID = "user_default"
+
+    // Resolved from SharedPreferences in init(). Two people can each pick their
+    // own sync code: the same code on a person's phone + desktop keeps those in
+    // sync, while different people get fully isolated data trees in Firestore.
+    @Volatile
+    private var userId = DEFAULT_USER_ID
+
+    // Normalize a sync code identically on Android and the Windows agent so the
+    // same human input ("Dhruv 01") resolves to the same Firestore doc id.
+    fun sanitizeSyncId(raw: String): String {
+        var clean = raw.trim().lowercase()
+        clean = clean.replace(Regex("[^a-z0-9_-]"), "-")
+        clean = clean.replace(Regex("-+"), "-")
+        clean = clean.trim('-')
+        return if (clean.isEmpty()) DEFAULT_USER_ID else clean.take(64)
+    }
+
+    fun getSyncId(): String = userId
+
+    fun setSyncId(context: Context, raw: String): String {
+        val clean = sanitizeSyncId(raw)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putString(PREF_SYNC_ID, clean).apply()
+        userId = clean
+        Log.i(TAG, "Sync code set to '$clean'")
+        return clean
+    }
 
     data class Decision(
         val allowNow: Boolean,
@@ -52,6 +81,12 @@ object FocusPolicyClient {
             Log.i(TAG, "Firebase initialized")
         }
 
+        // Resolve the active sync code (which Firestore user tree to read/write).
+        userId = sanitizeSyncId(
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(PREF_SYNC_ID, DEFAULT_USER_ID) ?: DEFAULT_USER_ID
+        )
+
         // Enable offline persistence so Firestore caches data on-device.
         // This means evaluate() returns cached results even when offline,
         // preventing the "reset to allowed" offline bypass.
@@ -73,7 +108,7 @@ object FocusPolicyClient {
 
     fun fetchPolicy(): JSONObject {
         val snap = Tasks.await(
-            db.collection("users").document(USER_ID)
+            db.collection("users").document(userId)
                 .collection("policy").document("global").get()
         )
         val data = snap.data ?: return JSONObject()
@@ -87,19 +122,19 @@ object FocusPolicyClient {
 
     fun evaluate(date: String): Decision {
         val policySnap = Tasks.await(
-            db.collection("users").document(USER_ID)
+            db.collection("users").document(userId)
                 .collection("policy").document("global").get()
         )
         val policy = policySnap.data ?: mapOf<String, Any>()
 
         val usageSnap = Tasks.await(
-            db.collection("users").document(USER_ID)
+            db.collection("users").document(userId)
                 .collection("usage_days").document(date).get()
         )
         val usage = usageSnap.data ?: mapOf<String, Any>()
 
         val focusSnap = Tasks.await(
-            db.collection("users").document(USER_ID)
+            db.collection("users").document(userId)
                 .collection("focus_session").document("current").get()
         )
         val focus = focusSnap.data ?: mapOf<String, Any>()
@@ -172,7 +207,7 @@ object FocusPolicyClient {
     fun requestExtension(date: String): ExtensionResult {
         // Check focus session — no extensions during a focus block
         val focusSnap = Tasks.await(
-            db.collection("users").document(USER_ID)
+            db.collection("users").document(userId)
                 .collection("focus_session").document("current").get()
         )
         val focus = focusSnap.data ?: mapOf<String, Any>()
@@ -185,7 +220,7 @@ object FocusPolicyClient {
 
         // Read policy for extension config
         val policySnap = Tasks.await(
-            db.collection("users").document(USER_ID)
+            db.collection("users").document(userId)
                 .collection("policy").document("global").get()
         )
         val policy = policySnap.data ?: return ExtensionResult(false, "no-policy", 0)
@@ -193,7 +228,7 @@ object FocusPolicyClient {
         val dailyExtensionLimit = (policy["dailyExtensionLimit"] as? Number)?.toInt() ?: 1
         val extensionMinutes = (policy["extensionMinutes"] as? Number)?.toInt() ?: 15
 
-        val usageRef = db.collection("users").document(USER_ID)
+        val usageRef = db.collection("users").document(userId)
             .collection("usage_days").document(date)
 
         // Atomically check and increment extensionsUsedToday
@@ -232,7 +267,7 @@ object FocusPolicyClient {
         // startedAt is a UTC ISO string, so startedAt.take(10) would land usage in
         // the wrong day for any session before local-midnight-plus-UTC-offset.
         val date = java.time.LocalDate.now().toString()
-        val usageRef = db.collection("users").document(USER_ID)
+        val usageRef = db.collection("users").document(userId)
             .collection("usage_days").document(date)
 
         Tasks.await(db.runTransaction { tx ->
@@ -261,7 +296,7 @@ object FocusPolicyClient {
             "timestamp" to endedAt
         )
         Tasks.await(
-            db.collection("users").document(USER_ID).collection("events").add(eventData)
+            db.collection("users").document(userId).collection("events").add(eventData)
         )
 
         Log.i(TAG, "Synced %.2f min for $target".format(durationMinutes))
@@ -271,7 +306,7 @@ object FocusPolicyClient {
 
     fun getStats(date: String): JSONObject {
         val snap = Tasks.await(
-            db.collection("users").document(USER_ID)
+            db.collection("users").document(userId)
                 .collection("usage_days").document(date).get()
         )
         val data = snap.data ?: mapOf<String, Any>()
@@ -298,7 +333,7 @@ object FocusPolicyClient {
 
     fun getPolicy(): PolicyData {
         val snap = Tasks.await(
-            db.collection("users").document(USER_ID)
+            db.collection("users").document(userId)
                 .collection("policy").document("global").get()
         )
         val data = snap.data ?: mapOf<String, Any>()
@@ -337,7 +372,7 @@ object FocusPolicyClient {
             }
         )
         Tasks.await(
-            db.collection("users").document(USER_ID)
+            db.collection("users").document(userId)
                 .collection("policy").document("global").set(data)
         )
     }
@@ -353,7 +388,7 @@ object FocusPolicyClient {
             val date = today.minusDays(daysAgo.toLong())
             val dateStr = date.toString()
             val snap = Tasks.await(
-                db.collection("users").document(USER_ID)
+                db.collection("users").document(userId)
                     .collection("usage_days").document(dateStr).get()
             )
             val usedMinutes = snap.data?.get("usedMinutes") as? Double ?: 0.0
@@ -369,7 +404,7 @@ object FocusPolicyClient {
         val endsAt = java.time.Instant.now().plusMillis(durationMinutes * 60_000L).toString()
         val data = mapOf("active" to true, "startsAt" to startsAt, "endsAt" to endsAt, "reason" to reason)
         Tasks.await(
-            db.collection("users").document(USER_ID)
+            db.collection("users").document(userId)
                 .collection("focus_session").document("current").set(data)
         )
         return FocusSessionInfo(true, endsAt)
@@ -378,7 +413,7 @@ object FocusPolicyClient {
     fun stopFocusSession(): FocusSessionInfo {
         val data = mapOf("active" to false, "startsAt" to "", "endsAt" to "")
         Tasks.await(
-            db.collection("users").document(USER_ID)
+            db.collection("users").document(userId)
                 .collection("focus_session").document("current").set(data)
         )
         return FocusSessionInfo(false, "")
@@ -386,7 +421,7 @@ object FocusPolicyClient {
 
     fun getFocusSession(): FocusSessionInfo {
         val snap = Tasks.await(
-            db.collection("users").document(USER_ID)
+            db.collection("users").document(userId)
                 .collection("focus_session").document("current").get()
         )
         val data = snap.data ?: mapOf<String, Any>()
@@ -400,7 +435,7 @@ object FocusPolicyClient {
 
     fun getTodos(): List<TodoItem> {
         val snap = Tasks.await(
-            db.collection("users").document(USER_ID).collection("todos").get()
+            db.collection("users").document(userId).collection("todos").get()
         )
         return snap.documents.map { doc ->
             TodoItem(
@@ -418,14 +453,14 @@ object FocusPolicyClient {
             "createdAt" to java.time.Instant.now().toString()
         )
         val ref = Tasks.await(
-            db.collection("users").document(USER_ID).collection("todos").add(data)
+            db.collection("users").document(userId).collection("todos").add(data)
         )
         return TodoItem(ref.id, text, false)
     }
 
     fun toggleTodo(todoId: String, completed: Boolean): Boolean {
         Tasks.await(
-            db.collection("users").document(USER_ID)
+            db.collection("users").document(userId)
                 .collection("todos").document(todoId).update("completed", completed)
         )
         return true
@@ -433,7 +468,7 @@ object FocusPolicyClient {
 
     fun deleteTodo(todoId: String): Boolean {
         Tasks.await(
-            db.collection("users").document(USER_ID)
+            db.collection("users").document(userId)
                 .collection("todos").document(todoId).delete()
         )
         return true

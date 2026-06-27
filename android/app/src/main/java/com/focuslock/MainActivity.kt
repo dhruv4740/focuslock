@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var editNewTodo: EditText
     private lateinit var layoutTodoList: LinearLayout
     private lateinit var editFocusDuration: EditText
+    private lateinit var editSyncId: EditText
 
     // Policy editor fields
     private lateinit var editDailyLimit: EditText
@@ -70,6 +71,7 @@ class MainActivity : AppCompatActivity() {
         editNewTodo = findViewById(R.id.editNewTodo)
         layoutTodoList = findViewById(R.id.layoutTodoList)
         editFocusDuration = findViewById(R.id.editFocusDuration)
+        editSyncId = findViewById(R.id.editSyncId)
 
         editDailyLimit = findViewById(R.id.editDailyLimit)
         editExtensionMins = findViewById(R.id.editExtensionMins)
@@ -86,6 +88,7 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         FocusPolicyClient.init(this)
 
+        setupSyncCode()
         setupTodoSection()
         setupFocusSession()
         setupPolicyEditor()
@@ -277,7 +280,10 @@ class MainActivity : AppCompatActivity() {
             }.start()
         }
 
-        // Load policy from Firestore
+        loadPolicyIntoEditor()
+    }
+
+    private fun loadPolicyIntoEditor() {
         Thread {
             try {
                 val policy = FocusPolicyClient.getPolicy()
@@ -294,6 +300,31 @@ class MainActivity : AppCompatActivity() {
                 // leave fields empty, user can fill in
             }
         }.start()
+    }
+
+    // ── Sync Code ─────────────────────────────────────────────────────────────
+
+    private fun setupSyncCode() {
+        editSyncId.setText(FocusPolicyClient.getSyncId())
+        findViewById<Button>(R.id.btnSaveSyncId).setOnClickListener {
+            val clean = FocusPolicyClient.setSyncId(this, editSyncId.text.toString())
+            editSyncId.setText(clean)
+
+            // Restart the monitor so it drops the previous account's in-memory
+            // state (target apps, cached limits) and re-fetches policy for the
+            // new code. The singleton userId is already updated in-process.
+            if (UsageMonitorService.isServiceActive) {
+                stopService(Intent(this, UsageMonitorService::class.java))
+                val svc = Intent(this, UsageMonitorService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc)
+                else startService(svc)
+            }
+
+            Toast.makeText(this, "Sync code set to \"$clean\"", Toast.LENGTH_SHORT).show()
+            currentPolicy = null
+            loadPolicyIntoEditor()
+            refreshDashboardData()
+        }
     }
 
     private fun isValidTime(t: String): Boolean =

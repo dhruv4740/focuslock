@@ -35,6 +35,64 @@
                 android:layout_marginTop="4dp" />
         </LinearLayout>
 
+        <!-- Sync Code Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="SYNC CODE"
+                android:textColor="@color/color_primary"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Use the same code on your phone and desktop to keep them in sync. A different person should pick their own code to keep their data separate."
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp"
+                android:layout_marginTop="6dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="12dp">
+
+                <EditText
+                    android:id="@+id/editSyncId"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:hint="e.g. dhruv-01"
+                    android:textColorHint="@color/text_secondary"
+                    android:inputType="textNoSuggestions"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:padding="10dp"
+                    android:background="@drawable/edittext_background"
+                    android:maxLines="1" />
+
+                <Button
+                    android:id="@+id/btnSaveSyncId"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Save"
+                    android:textColor="@color/text_primary"
+                    android:background="@drawable/button_primary"
+                    android:layout_marginStart="8dp" />
+            </LinearLayout>
+        </LinearLayout>
+
         <!-- Stats Card -->
         <LinearLayout
             android:layout_width="match_parent"
