@@ -14,11 +14,28 @@ class FocusAccessibilityService : AccessibilityService() {
     companion object {
         private const val CHANNEL_ID = "focuslock-accessibility"
         private const val NOTIFICATION_ID = 1102
+
+        // Live reference to the connected service so other components can issue
+        // global gestures without owning their own gesture-dispatch path.
+        @Volatile private var instance: FocusAccessibilityService? = null
+
+        // Sends the device to the launcher, pushing the current (blocked) app off
+        // the foreground so its media playback stops. An overlay alone leaves the
+        // blocked app RESUMED and still playing audio behind it. Returns false when
+        // the service isn't connected so callers can fall back to a HOME intent.
+        fun sendToHome(): Boolean =
+            instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME) ?: false
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        instance = this
         startForegroundServiceNotification()
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        if (instance === this) instance = null
+        return super.onUnbind(intent)
     }
 
     private fun startForegroundServiceNotification() {

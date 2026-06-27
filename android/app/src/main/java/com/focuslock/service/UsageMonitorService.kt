@@ -411,8 +411,26 @@ class UsageMonitorService : Service() {
 
         dismissTimerOverlay()
         isLockOverlayActive = true
+        // Push the blocked app off the foreground so its media (e.g. reels) stops.
+        // Setting isLockOverlayActive first makes handleForegroundChanged() ignore
+        // the launcher window-change this triggers, so currentForegroundTarget is
+        // preserved and the overlay service's foreground guard still passes.
+        sendBlockedAppToBackground()
         startService(Intent(this, LockOverlayService::class.java)
             .putExtra(LockOverlayService.EXTRA_TARGET, packageName))
+    }
+
+    // Prefer the accessibility HOME action; fall back to a HOME activity launch.
+    private fun sendBlockedAppToBackground() {
+        if (FocusAccessibilityService.sendToHome()) return
+        try {
+            startActivity(Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        } catch (e: Exception) {
+            Log.w(TAG, "sendBlockedAppToBackground fallback failed", e)
+        }
     }
 
     private fun dismissLockOverlay() {
