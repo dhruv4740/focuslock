@@ -5,6 +5,7 @@ import android.util.Log
 import com.google.android.gms.tasks.Tasks
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
 import org.json.JSONArray
@@ -101,8 +102,27 @@ object FocusPolicyClient {
         }
     }
 
+    // Firestore rules require request.auth != null. We use anonymous auth: the
+    // first Firestore access signs in (blocking on the calling background thread,
+    // same as every other Tasks.await here); afterwards currentUser is non-null
+    // so this is a cheap no-op. Failure is logged, not fatal — offline cache may
+    // still serve the last read.
+    private fun ensureSignedIn() {
+        val auth = FirebaseAuth.getInstance()
+        if (auth.currentUser != null) return
+        try {
+            Tasks.await(auth.signInAnonymously())
+            Log.i(TAG, "Anonymous auth ready (uid=${auth.currentUser?.uid})")
+        } catch (e: Exception) {
+            Log.e(TAG, "Anonymous sign-in failed", e)
+        }
+    }
+
     private val db: FirebaseFirestore
-        get() = FirebaseFirestore.getInstance()
+        get() {
+            ensureSignedIn()
+            return FirebaseFirestore.getInstance()
+        }
 
     // ── Policy ────────────────────────────────────────────────────────────────
 

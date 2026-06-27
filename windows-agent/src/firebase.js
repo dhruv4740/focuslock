@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { initializeApp } from "firebase/app";
+import { getAuth, signInAnonymously } from "firebase/auth";
 import {
   getFirestore,
   doc,
@@ -32,6 +33,17 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+
+// Firestore rules require request.auth != null. Sign in anonymously at module
+// load with a top-level await so every importer of `db` (agent.js, api.js,
+// main.js, the CLIs) only sees Firestore once auth is ready. Failure is logged,
+// not fatal — keeps the app launching if the network is down at startup.
+try {
+  await signInAnonymously(getAuth(app));
+  console.log("[firebase] anonymous auth ready");
+} catch (err) {
+  console.error("[firebase] anonymous auth failed:", String(err));
+}
 
 // Persisted sync code lives next to the other config so it survives restarts
 // and works in both the Electron app and the standalone `node agent.js` CLI.
