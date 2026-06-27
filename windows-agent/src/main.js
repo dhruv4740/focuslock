@@ -1,4 +1,9 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu } from 'electron';
+// `electron` is a CommonJS module. Under an ESM entry point (this project is
+// "type": "module"), Node can't statically detect its named exports, so
+// `import { app, BrowserWindow } from 'electron'` throws "does not provide an
+// export named …". Default-import the module object and destructure instead.
+import electron from 'electron';
+const { app, BrowserWindow, ipcMain, Tray, Menu } = electron;
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { readFileSync, writeFileSync } from 'fs';
