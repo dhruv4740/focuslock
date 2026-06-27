@@ -227,9 +227,14 @@ async function killTargetProcess(processName) {
   }
 }
 
-// Sends Ctrl+W directly to the target window handle via PostMessage so the
-// window does not need to be in the foreground. Avoids the race condition of
-// SetForegroundWindow + 100 ms sleep + SendKeys.
+// Closes the active browser tab with a real Ctrl+W via SendInput. PostMessage
+// of WM_KEYDOWN does NOT work on Chromium: Chrome reads modifier state through
+// GetKeyState, which PostMessage never updates, so a posted 'W' is seen as a
+// plain keypress with Ctrl not held. SendInput injects into the system input
+// stream and updates global key state, so the browser sees a genuine Ctrl+W.
+// SendInput targets the foreground window — which is exactly the window we
+// enforce on, since the monitor only acts on the active window. We re-assert
+// foreground on the target hwnd first so a stray focus change can't misfire it.
 async function closeWindow(windowId, targetName) {
   if (!windowId) return;
   try {
@@ -238,23 +243,50 @@ $hwnd = [IntPtr]${windowId}
 $sig = @"
 using System;
 using System.Runtime.InteropServices;
-public class FLWin32 {
-    public const int WM_KEYDOWN = 0x0100;
-    public const int WM_KEYUP   = 0x0101;
-    public const int VK_CONTROL = 0x11;
-    public const int VK_W       = 0x57;
-    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+public class FLSendInput {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MOUSEINPUT { public int dx; public int dy; public uint mouseData; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct HARDWAREINPUT { public uint uMsg; public ushort wParamL; public ushort wParamH; }
+    [StructLayout(LayoutKind.Explicit)]
+    public struct InputUnion {
+        [FieldOffset(0)] public MOUSEINPUT mi;
+        [FieldOffset(0)] public KEYBDINPUT ki;
+        [FieldOffset(0)] public HARDWAREINPUT hi;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct INPUT { public uint type; public InputUnion u; }
+    [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    public const uint INPUT_KEYBOARD = 1;
+    public const uint KEYEVENTF_KEYUP = 0x0002;
+    public const ushort VK_CONTROL = 0x11;
+    public const ushort VK_W = 0x57;
+    public static uint CtrlW(IntPtr hWnd) {
+        SetForegroundWindow(hWnd);
+        System.Threading.Thread.Sleep(20);
+        INPUT[] inputs = new INPUT[4];
+        for (int i = 0; i < 4; i++) inputs[i].type = INPUT_KEYBOARD;
+        inputs[0].u.ki.wVk = VK_CONTROL;
+        inputs[1].u.ki.wVk = VK_W;
+        inputs[2].u.ki.wVk = VK_W;       inputs[2].u.ki.dwFlags = KEYEVENTF_KEYUP;
+        inputs[3].u.ki.wVk = VK_CONTROL; inputs[3].u.ki.dwFlags = KEYEVENTF_KEYUP;
+        return SendInput(4, inputs, Marshal.SizeOf(typeof(INPUT)));
+    }
 }
 "@
-if (-not ([System.Management.Automation.PSTypeName]'FLWin32').Type) {
+if (-not ([System.Management.Automation.PSTypeName]'FLSendInput').Type) {
     Add-Type -TypeDefinition $sig
 }
-[FLWin32]::PostMessage($hwnd, [FLWin32]::WM_KEYDOWN, [FLWin32]::VK_CONTROL, 0) | Out-Null
-[FLWin32]::PostMessage($hwnd, [FLWin32]::WM_KEYDOWN, [FLWin32]::VK_W,       0) | Out-Null
-[FLWin32]::PostMessage($hwnd, [FLWin32]::WM_KEYUP,   [FLWin32]::VK_W,       0) | Out-Null
-[FLWin32]::PostMessage($hwnd, [FLWin32]::WM_KEYUP,   [FLWin32]::VK_CONTROL, 0) | Out-Null
+[FLSendInput]::CtrlW($hwnd) | Out-Null
 `;
-    await execFileAsync("powershell", ["-NoProfile", "-Command", script]);
+    await execFileAsync(
+      "powershell",
+      ["-NoProfile", "-WindowStyle", "Hidden", "-Command", script],
+      { windowsHide: true }
+    );
     console.log(`[enforce] closed tab for ${targetName} (hwnd=${windowId})`);
   } catch (error) {
     console.error(`[enforce] closeWindow failed for ${targetName}: ${String(error)}`);
