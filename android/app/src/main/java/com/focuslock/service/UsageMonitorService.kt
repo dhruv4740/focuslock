@@ -155,8 +155,16 @@ class UsageMonitorService : Service() {
         pkg.contains("phone")
 
     private fun handleForegroundChanged(packageName: String) {
-        if (packageName == this.packageName && (isLockOverlayActive || isFrictionOverlayActive)) {
-            Log.d(TAG, "Ignoring own package while overlay is active")
+        // While our own friction/lock overlay is the active barrier, ignore any
+        // foreground change that isn't a switch to a *different* target app.
+        // When the user interacts with the overlay (e.g. tapping the reflection
+        // field), the keyboard/autofill/system popups briefly come to the front.
+        // Treating those as "left the target app" tore the overlay down and
+        // rebuilt it from step 1 — the breathing→…→type-sentence loop restart.
+        // The overlay dismisses itself via its Exit/Proceed buttons, so there is
+        // no need to react to transient windows here.
+        if ((isLockOverlayActive || isFrictionOverlayActive) && !targetApps.contains(packageName)) {
+            Log.d(TAG, "Ignoring '$packageName' while overlay barrier is active")
             return
         }
 
