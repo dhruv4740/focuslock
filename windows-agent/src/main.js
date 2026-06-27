@@ -1,9 +1,7 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu } from 'electron';
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
 import { readFileSync, writeFileSync } from 'fs';
-import { spawn, exec } from 'child_process';
 import { startAgent, stopAgent, getAgentState } from './agent.js';
 import { SETTINGS_PATH, sanitizeSyncId, USER_ID } from './firebase.js';
 import * as api from './api.js';
@@ -11,37 +9,6 @@ import * as api from './api.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow = null;
 let tray = null;
-
-
-
-// Get local IPv4 address of active Wi-Fi / Ethernet adapter
-function getLocalIpAddress() {
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    // Skip virtual or loopback interfaces
-    const lowerName = name.toLowerCase();
-    if (lowerName.includes("virtual") || lowerName.includes("vbox") || lowerName.includes("vmware") || lowerName.includes("vgate") || lowerName.includes("loopback")) {
-      continue;
-    }
-    for (const net of interfaces[name]) {
-      if (net.family === 'IPv4' && !net.internal) {
-        // Prefer local subnet IPs (192.168.x.x or 10.x.x.x)
-        if (net.address.startsWith("192.168.") || net.address.startsWith("10.")) {
-          return net.address;
-        }
-      }
-    }
-  }
-  // Fallback to first external IPv4
-  for (const name of Object.keys(interfaces)) {
-    for (const net of interfaces[name]) {
-      if (net.family === 'IPv4' && !net.internal) {
-        return net.address;
-      }
-    }
-  }
-  return "127.0.0.1";
-}
 
 function createMainWindow() {
   if (mainWindow) {
@@ -88,10 +55,6 @@ function createTray() {
   
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Open Dashboard', click: () => createMainWindow() },
-    {
-      label: 'Fix Firewall Rule',
-      click: () => runFirewallFixInternal()
-    },
     { type: 'separator' },
     { label: 'Quit', click: () => {
       app.isQuitting = true;
@@ -104,23 +67,6 @@ function createTray() {
 
   tray.on('double-click', () => {
     createMainWindow();
-  });
-}
-
-function runFirewallFixInternal() {
-  return new Promise((resolve, reject) => {
-    const scriptPath = path.resolve(__dirname, "..", "scripts", "add-firewall-rule.ps1");
-    // Run elevated PowerShell
-    const command = `powershell -Command "Start-Process powershell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \\"${scriptPath}\\"' -Verb RunAs"`;
-    exec(command, (err) => {
-      if (err) {
-        console.error("Firewall rule elevation failed:", err);
-        reject(err);
-      } else {
-        console.log("Elevated firewall rule executed.");
-        resolve(true);
-      }
-    });
   });
 }
 
@@ -160,26 +106,6 @@ app.on('will-quit', () => {
 });
 
 // IPC Handler Registrations
-ipcMain.handle('get-system-status', () => {
-  return {
-    active: true,
-    backendUrl: `http://${getLocalIpAddress()}:4050`
-  };
-});
-
-ipcMain.handle('get-local-ip', () => {
-  return getLocalIpAddress();
-});
-
-ipcMain.handle('run-firewall-fix', async () => {
-  try {
-    await runFirewallFixInternal();
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
 ipcMain.handle('get-sync-id', () => {
   try {
     const cfg = JSON.parse(readFileSync(SETTINGS_PATH, 'utf8'));
