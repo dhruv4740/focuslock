@@ -75,8 +75,28 @@ function createTray() {
   });
 }
 
+// Single-instance lock: this app auto-starts on login and lives in the tray,
+// so a manual launch (or a second startup trigger) must not spin up a second
+// enforcement loop — two agents would double-issue taskkill/Ctrl+W. The second
+// instance hands focus to the existing window and exits.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    } else {
+      createMainWindow();
+    }
+  });
+}
+
 // Lifecycle Events
 app.whenReady().then(() => {
+  if (!gotSingleInstanceLock) return; // second instance: hand off and exit, don't start the agent
   startAgent();
   createTray();
   createMainWindow();
