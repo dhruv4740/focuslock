@@ -56,6 +56,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var txtPolicySaved: TextView
     private lateinit var spinnerInstagramReels: Spinner
     private lateinit var spinnerYoutubeShorts: Spinner
+    private lateinit var editReelLimitInstagram: EditText
+    private lateinit var editReelLimitYoutube: EditText
+    private lateinit var txtReelCounts: TextView
 
     // Display labels for the blocked-surfaces spinners, positionally mapped to
     // the wire values stored in PolicyData.blockedSurfaces / SurfaceMode.fromWire.
@@ -95,6 +98,9 @@ class MainActivity : AppCompatActivity() {
         txtPolicySaved = findViewById(R.id.txtPolicySaved)
         spinnerInstagramReels = findViewById(R.id.spinnerInstagramReels)
         spinnerYoutubeShorts = findViewById(R.id.spinnerYoutubeShorts)
+        editReelLimitInstagram = findViewById(R.id.editReelLimitInstagram)
+        editReelLimitYoutube = findViewById(R.id.editReelLimitYoutube)
+        txtReelCounts = findViewById(R.id.txtReelCounts)
         layoutWeeklyChart = findViewById(R.id.layoutWeeklyChart)
 
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -302,19 +308,24 @@ class MainActivity : AppCompatActivity() {
                 "instagram_reels" to surfaceModeWireValues[spinnerInstagramReels.selectedItemPosition],
                 "youtube_shorts" to surfaceModeWireValues[spinnerYoutubeShorts.selectedItemPosition]
             )
+            val reelDailyLimit = mapOf(
+                "instagram_reels" to (editReelLimitInstagram.text.toString().trim().toIntOrNull() ?: 0),
+                "youtube_shorts" to (editReelLimitYoutube.text.toString().trim().toIntOrNull() ?: 0)
+            )
             val updated = policy.copy(
                 dailyLimitMinutes = dailyLimit,
                 extensionMinutes = extMins,
                 dailyExtensionLimit = extLimit,
                 hardBlockAfterLimit = switchHardBlock.isChecked,
-                blockedSurfaces = blockedSurfaces
+                blockedSurfaces = blockedSurfaces,
+                reelDailyLimit = reelDailyLimit
             )
             currentPolicy = updated
             btn.isEnabled = false
             Thread {
                 try {
                     FocusPolicyClient.updatePolicy(updated)
-                    SurfaceBlocker.updateConfig(blockedSurfaces)
+                    SurfaceBlocker.updateConfig(blockedSurfaces, reelDailyLimit)
                     runOnUiThread {
                         txtPolicySaved.visibility = View.VISIBLE
                         txtPolicySaved.postDelayed({ txtPolicySaved.visibility = View.GONE }, 2000)
@@ -350,6 +361,10 @@ class MainActivity : AppCompatActivity() {
                     spinnerYoutubeShorts.setSelection(
                         surfaceModeWireValues.indexOf(policy.blockedSurfaces["youtube_shorts"] ?: "off").coerceAtLeast(0)
                     )
+                    val igLimit = policy.reelDailyLimit["instagram_reels"] ?: 0
+                    val ytLimit = policy.reelDailyLimit["youtube_shorts"] ?: 0
+                    editReelLimitInstagram.setText(if (igLimit > 0) igLimit.toString() else "")
+                    editReelLimitYoutube.setText(if (ytLimit > 0) ytLimit.toString() else "")
                 }
             } catch (e: Exception) {
                 // leave fields empty, user can fill in
@@ -601,6 +616,11 @@ class MainActivity : AppCompatActivity() {
 
                     val opens = stats.optInt("opensToday", 0)
                     todayOpensText.text = "$opens opens today"
+
+                    val reelCounts = stats.optJSONObject("reelCounts")
+                    val igReels = reelCounts?.optInt("instagram_reels", 0) ?: 0
+                    val ytShorts = reelCounts?.optInt("youtube_shorts", 0) ?: 0
+                    txtReelCounts.text = "Today: $igReels Reels · $ytShorts Shorts"
                 }
             } catch (e: Exception) {
                 runOnUiThread {

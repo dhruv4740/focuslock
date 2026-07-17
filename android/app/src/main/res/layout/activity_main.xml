@@ -722,6 +722,20 @@
                     android:id="@+id/spinnerInstagramReels"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content" />
+
+                <EditText
+                    android:id="@+id/editReelLimitInstagram"
+                    android:layout_width="60dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:hint="0=off"
+                    android:textColorHint="@color/text_secondary"
+                    android:inputType="number"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp"
+                    android:padding="8dp"
+                    android:background="@drawable/edittext_background"
+                    android:maxLines="1" />
             </LinearLayout>
 
             <LinearLayout
@@ -743,7 +757,30 @@
                     android:id="@+id/spinnerYoutubeShorts"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content" />
+
+                <EditText
+                    android:id="@+id/editReelLimitYoutube"
+                    android:layout_width="60dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:hint="0=off"
+                    android:textColorHint="@color/text_secondary"
+                    android:inputType="number"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp"
+                    android:padding="8dp"
+                    android:background="@drawable/edittext_background"
+                    android:maxLines="1" />
             </LinearLayout>
+
+            <TextView
+                android:id="@+id/txtReelCounts"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Today: 0 Reels · 0 Shorts"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
 
             <Button
                 android:id="@+id/btnSavePolicy"
