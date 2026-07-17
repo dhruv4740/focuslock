@@ -1,6 +1,5 @@
 package com.focuslock.service
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -13,7 +12,6 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import com.focuslock.R
 import com.focuslock.data.FocusPolicyClient
 import com.focuslock.surface.SurfaceBlocker
@@ -25,9 +23,8 @@ class UsageMonitorService : Service() {
 
     companion object {
         private const val TAG = "UsageMonitorService"
-        private const val CHANNEL_ID = "focuslock-monitor"
+        private const val CHANNEL_ID_MONITOR_LEGACY = "focuslock-monitor"
         private const val CHANNEL_ID_ALERTS = "focuslock-alerts"
-        private const val NOTIFICATION_ID = 1101
         private const val NOTIFICATION_ALERT_ID = 1102
         private const val OVERLAY_COOLDOWN_MS = 3000L
 
@@ -64,7 +61,6 @@ class UsageMonitorService : Service() {
     private var hadSuccessfulEvaluate = false
 
     private var warningNotificationSentDate = ""
-    private var isForegroundStarted = false
     private var lastPolicyRefreshAt = 0L
     private val POLICY_REFRESH_THROTTLE_MS = 15 * 60 * 1000L
     private var localTimerRunnable: Runnable? = null
@@ -99,14 +95,6 @@ class UsageMonitorService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "onStartCommand: ${intent?.action}")
-        // Only the first call actually needs to post the notification — this fires
-        // on every foreground-app-change system-wide, and re-posting identical
-        // content on every single app switch all day is pure overhead.
-        // updateForegroundNotice() is what actually changes the visible text.
-        if (!isForegroundStarted) {
-            startForeground(NOTIFICATION_ID, buildNotification("Monitoring unproductive usage…"))
-            isForegroundStarted = true
-        }
 
         when (intent?.action) {
             ACTION_FOREGROUND_CHANGED -> {
@@ -135,7 +123,6 @@ class UsageMonitorService : Service() {
     override fun onDestroy() {
         Log.d(TAG, "onDestroy")
         isServiceActive = false
-        isForegroundStarted = false
         isRunning.set(false)
         networkExecutor.shutdownNow()
 
@@ -218,7 +205,6 @@ class UsageMonitorService : Service() {
             sessionStartByPackage[packageName] = timestamp
         }
 
-        updateForegroundNotice("Tracking: $packageName")
         showTimerOverlay(packageName)
 
         if (blockedTargets.contains(packageName)) {
@@ -244,7 +230,6 @@ class UsageMonitorService : Service() {
         dismissLockOverlay()
         dismissTimerOverlay()
         dismissFrictionOverlay()
-        updateForegroundNotice("Monitoring unproductive usage…")
 
         closeRunnableByPackage.remove(packageName)?.let { handler.removeCallbacks(it) }
 
@@ -528,29 +513,13 @@ class UsageMonitorService : Service() {
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-            mgr.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "FocusLock Monitor", NotificationManager.IMPORTANCE_LOW)
-            )
+            // The monitor no longer runs as a foreground service and posts no
+            // notification of its own — drop the channel so upgrading users don't
+            // keep a dead entry in system notification settings.
+            mgr.deleteNotificationChannel(CHANNEL_ID_MONITOR_LEGACY)
             mgr.createNotificationChannel(
                 NotificationChannel(CHANNEL_ID_ALERTS, "FocusLock Alerts", NotificationManager.IMPORTANCE_HIGH)
             )
-        }
-    }
-
-    private fun buildNotification(message: String): Notification =
-        NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("FocusLock")
-            .setContentText(message)
-            .setOngoing(true)
-            .build()
-
-    private fun updateForegroundNotice(message: String) {
-        try {
-            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
-                .notify(NOTIFICATION_ID, buildNotification(message))
-        } catch (e: Exception) {
-            Log.w(TAG, "updateForegroundNotice failed", e)
         }
     }
 }

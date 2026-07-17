@@ -20,14 +20,25 @@ class FocusAccessibilityService : AccessibilityService() {
             instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME) ?: false
     }
 
+    // Package forwarded to UsageMonitorService by the last TYPE_WINDOW_STATE_CHANGED
+    // event — lets onAccessibilityEvent skip the IPC round trip when the foreground
+    // app hasn't actually changed (that event type also fires for dialogs/fragments
+    // within the same app).
+    private var lastForwardedPackage: String? = null
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         SurfaceBlocker.reset()
-        // No startForeground() here: accessibility services are kept alive by the
-        // OS's AccessibilityManager/WindowManagerService binding, not the
-        // foreground-service-kill policy a persistent notification exists to work
-        // around. UsageMonitorService is the one that genuinely needs it.
+        // UsageMonitorService is a plain (non-foreground) service; the accessibility
+        // binding above is what actually keeps this process alive, so restart the
+        // monitor here rather than relying solely on BootCompletedReceiver — this is
+        // the authoritative restart path after boot or a process kill.
+        try {
+            startService(Intent(this, UsageMonitorService::class.java))
+        } catch (e: Exception) {
+            // Best-effort; a later foreground-change event will retry via startService below.
+        }
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -40,14 +51,17 @@ class FocusAccessibilityService : AccessibilityService() {
         if (event == null) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val packageName = event.packageName?.toString() ?: return
-            val intent = Intent(this, UsageMonitorService::class.java).apply {
-                action = "com.focuslock.ACTION_FOREGROUND_CHANGED"
-                putExtra("package_name", packageName)
-            }
-            try {
-                startService(intent)
-            } catch (e: Exception) {
-                // Fail-safe for background limitations (though accessibility services are immune)
+            if (packageName != lastForwardedPackage || !UsageMonitorService.isServiceActive) {
+                val intent = Intent(this, UsageMonitorService::class.java).apply {
+                    action = "com.focuslock.ACTION_FOREGROUND_CHANGED"
+                    putExtra("package_name", packageName)
+                }
+                try {
+                    startService(intent)
+                    lastForwardedPackage = packageName
+                } catch (e: Exception) {
+                    // Fail-safe for background limitations (though accessibility services are immune)
+                }
             }
         }
         SurfaceBlocker.onAccessibilityEvent(event, this)

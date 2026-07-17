@@ -177,12 +177,7 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "Please grant Usage Access first", Toast.LENGTH_LONG).show()
                 return@setOnClickListener
             }
-            val serviceIntent = Intent(this, UsageMonitorService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
-            }
+            startService(Intent(this, UsageMonitorService::class.java))
             Toast.makeText(this, "Monitor started", Toast.LENGTH_SHORT).show()
         }
         findViewById<Button>(R.id.btnStopMonitor).setOnClickListener {
@@ -433,9 +428,7 @@ class MainActivity : AppCompatActivity() {
             // new code. The singleton userId is already updated in-process.
             if (UsageMonitorService.isServiceActive) {
                 stopService(Intent(this, UsageMonitorService::class.java))
-                val svc = Intent(this, UsageMonitorService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc)
-                else startService(svc)
+                startService(Intent(this, UsageMonitorService::class.java))
             }
 
             Toast.makeText(this, "Sync code set to \"$clean\"", Toast.LENGTH_SHORT).show()

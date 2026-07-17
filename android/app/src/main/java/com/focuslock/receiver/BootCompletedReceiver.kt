@@ -3,10 +3,14 @@ package com.focuslock.receiver
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.util.Log
 import com.focuslock.service.UsageMonitorService
 
+// Best-effort restart: UsageMonitorService is a plain (non-foreground) service, so
+// starting it here can be dropped by OEM background-start restrictions on some
+// devices. That's acceptable — FocusAccessibilityService.onServiceConnected() is the
+// authoritative restart path, since the OS rebinds enabled accessibility services
+// automatically after boot regardless of what this receiver manages.
 class BootCompletedReceiver : BroadcastReceiver() {
 
     companion object {
@@ -19,13 +23,8 @@ class BootCompletedReceiver : BroadcastReceiver() {
 
             Log.d(TAG, "Boot/update received, starting UsageMonitorService")
 
-            val serviceIntent = Intent(context, UsageMonitorService::class.java)
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(serviceIntent)
-                } else {
-                    context.startService(serviceIntent)
-                }
+                context.startService(Intent(context, UsageMonitorService::class.java))
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start service on boot", e)
             }
