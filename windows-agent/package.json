@@ -2,7 +2,7 @@
   "name": "focuslock-windows-agent",
   "private": true,
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "FocusLock desktop focus agent",
   "author": "FocusLock",
   "main": "src/main.js",
@@ -41,7 +41,8 @@
       "oneClick": true,
       "perMachine": false,
       "allowToChangeInstallationDirectory": false,
-      "include": "build/uninstaller.nsh"
+      "include": "build/uninstaller.nsh",
+      "artifactName": "FocusLock-Setup-${version}.${ext}"
     },
     "publish": [
       {
