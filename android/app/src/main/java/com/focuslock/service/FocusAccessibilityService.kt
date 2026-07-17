@@ -37,6 +37,7 @@ class FocusAccessibilityService : AccessibilityService() {
 
     override fun onUnbind(intent: Intent?): Boolean {
         if (instance === this) instance = null
+        SurfaceBlocker.flushNow()
         return super.onUnbind(intent)
     }
 
@@ -80,7 +81,7 @@ class FocusAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        // No-op.
+        SurfaceBlocker.flushNow()
     }
 }
 

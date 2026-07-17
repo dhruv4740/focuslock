@@ -3,6 +3,10 @@ package com.focuslock.surface
 import android.accessibilityservice.AccessibilityService
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import com.focuslock.data.FocusPolicyClient
+import java.time.LocalDate
+import java.util.concurrent.Executors
 
 /**
  * Android-side wiring for reel/short surface detection. Owns the single shared
@@ -10,26 +14,118 @@ import android.view.accessibility.AccessibilityEvent
  * probes. Called from [com.focuslock.service.FocusAccessibilityService] on every
  * event; app-level blocking (targetApps) is a separate flow in UsageMonitorService
  * and always wins on its own — its HOME action supersedes any Back press here.
+ *
+ * Also owns the daily reel counter: one-at-a-time grants are counted (best-effort
+ * skipping ad-labeled reels), and once a configured daily limit is reached the
+ * effective mode for that surface auto-upgrades to BLOCK until local midnight.
+ * All mutable state here is read from the accessibility-event (main) thread but
+ * written from arbitrary background threads (policy Save, policy refresh) — every
+ * field is therefore a @Volatile immutable-value reassignment, never mutated
+ * in place, matching the rest of this object.
  */
 object SurfaceBlocker {
     private const val TAG = "SurfaceBlocker"
     private const val PRESENCE_PROBE_THROTTLE_MS = 500L
+    private const val FLUSH_THROTTLE_MS = 15_000L
 
     @Volatile private var modes: Map<BlockableSurface, SurfaceMode> = emptyMap()
+    @Volatile private var reelLimits: Map<BlockableSurface, Int> = emptyMap()
+    @Volatile private var reelCounts: Map<BlockableSurface, Int> = emptyMap()
+    @Volatile private var pendingDelta: Map<BlockableSurface, Int> = emptyMap()
+    @Volatile private var trackedDate: String = ""
+    @Volatile private var activeSessionSurface: BlockableSurface? = null
+    @Volatile private var lastFlushAtMs = 0L
+
     private val tracker = SurfaceSessionTracker()
+    private val flushExecutor = Executors.newSingleThreadExecutor()
     @Volatile private var lastProbeAtMs = 0L
 
     val isActive: Boolean
         get() = modes.values.any { it != SurfaceMode.OFF }
 
     /** Called from UsageMonitorService.refreshPolicy() and after a policy Save. */
-    fun updateConfig(wire: Map<String, String>) {
+    fun updateConfig(wire: Map<String, String>, reelLimits: Map<String, Int> = emptyMap()) {
         modes = BlockableSurface.entries.associateWith { SurfaceMode.fromWire(wire[it.wireKey]) }
+        this.reelLimits = BlockableSurface.entries.associateWith { reelLimits[it.wireKey] ?: 0 }
         tracker.reset()
+        activeSessionSurface = null
+    }
+
+    /** Called once from UsageMonitorService.onCreate() to seed today's counts from Firestore. */
+    fun seedReelCounts(date: String, counts: Map<String, Int>) {
+        // Preserve any not-yet-flushed increments recorded before this seed arrived
+        // (accessibility events can start flowing before the Firestore read returns).
+        val carryOver = pendingDelta
+        trackedDate = date
+        reelCounts = BlockableSurface.entries.associateWith { surface ->
+            (counts[surface.wireKey] ?: 0) + (carryOver[surface] ?: 0)
+        }
     }
 
     fun reset() {
         tracker.reset()
+        activeSessionSurface = null
+    }
+
+    /** Forces an immediate Firestore flush of any unflushed reel-count deltas. */
+    fun flushNow() = maybeFlush(force = true)
+
+    private fun effectiveMode(surface: BlockableSurface): SurfaceMode {
+        val configured = modes[surface] ?: SurfaceMode.OFF
+        if (configured == SurfaceMode.OFF) return SurfaceMode.OFF
+        val limit = reelLimits[surface] ?: 0
+        if (limit > 0 && (reelCounts[surface] ?: 0) >= limit) return SurfaceMode.BLOCK
+        return configured
+    }
+
+    private fun rolloverIfNeeded() {
+        val today = LocalDate.now().toString()
+        if (today == trackedDate) return
+        // Flush whatever the previous day accumulated under its own date before
+        // resetting, so a midnight rollover mid-session never silently drops counts.
+        if (pendingDelta.isNotEmpty() && trackedDate.isNotEmpty()) {
+            val staleDate = trackedDate
+            val deltas = pendingDelta.mapKeys { it.key.wireKey }
+            flushExecutor.submit {
+                try {
+                    FocusPolicyClient.incrementReelCounts(staleDate, deltas)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Reel count flush failed", e)
+                }
+            }
+        }
+        trackedDate = today
+        reelCounts = emptyMap()
+        pendingDelta = emptyMap()
+    }
+
+    private fun recordReelView(surface: BlockableSurface, root: AccessibilityNodeInfo) {
+        val keywords = SurfaceMarkers.adKeywords[surface] ?: emptySet()
+        val looksLikeAd = keywords.any { kw -> !root.findAccessibilityNodeInfosByText(kw).isNullOrEmpty() }
+        if (looksLikeAd) {
+            Log.d(TAG, "Skipping reel count for ${surface.wireKey} — ad heuristic matched")
+            return
+        }
+        reelCounts = reelCounts + (surface to ((reelCounts[surface] ?: 0) + 1))
+        pendingDelta = pendingDelta + (surface to ((pendingDelta[surface] ?: 0) + 1))
+        maybeFlush()
+    }
+
+    private fun maybeFlush(force: Boolean = false) {
+        if (pendingDelta.isEmpty()) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastFlushAtMs < FLUSH_THROTTLE_MS) return
+        lastFlushAtMs = now
+        val date = trackedDate
+        val deltas = pendingDelta.mapKeys { it.key.wireKey }
+        pendingDelta = emptyMap()
+        flushExecutor.submit {
+            try {
+                FocusPolicyClient.incrementReelCounts(date, deltas)
+            } catch (e: Exception) {
+                Log.w(TAG, "Reel count flush failed", e)
+            }
+        }
     }
 
     private fun isTransientSystemPackage(pkg: String) =
@@ -52,11 +148,15 @@ object SurfaceBlocker {
             // reset an in-progress one-at-a-time grant.
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && !isTransientSystemPackage(pkg)) {
                 tracker.onViewerGone(nowMs)
+                if (activeSessionSurface != null) {
+                    activeSessionSurface = null
+                    flushNow()
+                }
             }
             return
         }
 
-        val mode = modes[surface] ?: SurfaceMode.OFF
+        val mode = effectiveMode(surface)
         if (mode == SurfaceMode.OFF) return
 
         val decision = when (event.eventType) {
@@ -96,16 +196,28 @@ object SurfaceBlocker {
     ): SurfaceDecision? {
         if (nowMs - lastProbeAtMs < PRESENCE_PROBE_THROTTLE_MS) return null
         lastProbeAtMs = nowMs
+        rolloverIfNeeded()
 
         val ids = SurfaceMarkers.presenceIds[surface] ?: return null
         val root = service.rootInActiveWindow ?: return null
         val present = ids.any { id -> !root.findAccessibilityNodeInfosByViewId(id).isNullOrEmpty() }
 
-        return if (present) {
-            tracker.onViewerVisible(surface, mode, nowMs)
-        } else {
+        if (!present) {
             tracker.onViewerGone(nowMs)
-            null
+            if (activeSessionSurface == surface) {
+                activeSessionSurface = null
+                flushNow()
+            }
+            return null
+        }
+
+        return when (val decision = tracker.onViewerVisible(surface, mode, nowMs)) {
+            SurfaceDecision.GRANT_ENTRY -> {
+                activeSessionSurface = surface
+                recordReelView(surface, root)
+                SurfaceDecision.ALLOW
+            }
+            else -> decision
         }
     }
 }

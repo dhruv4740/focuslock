@@ -56,9 +56,20 @@ object SurfaceMarkers {
             "com.google.android.youtube:id/reel_player_page_container"
         )
     )
+
+    // Best-effort ad markers for the reel counter. Neither platform exposes a real
+    // "this is an ad" flag over the accessibility API — this is a text-label
+    // heuristic only. Deliberately conservative (no bare "Ad", which would
+    // substring-match ordinary words like "Adam"): it under-detects ads rather
+    // than risking any behavioral change to real content. Counting is the only
+    // thing this gates — it never affects whether a reel is shown or blocked.
+    val adKeywords: Map<BlockableSurface, Set<String>> = mapOf(
+        BlockableSurface.INSTAGRAM_REELS to setOf("Sponsored"),
+        BlockableSurface.YOUTUBE_SHORTS to setOf("Sponsored")
+    )
 }
 
-enum class SurfaceDecision { ALLOW, PRESS_BACK }
+enum class SurfaceDecision { ALLOW, PRESS_BACK, GRANT_ENTRY }
 
 /**
  * Pure state machine deciding whether a detected reel/short surface should be left
@@ -113,7 +124,7 @@ class SurfaceSessionTracker(
             SurfaceMode.BLOCK -> pressBack(nowMs)
             SurfaceMode.ONE_AT_A_TIME -> {
                 state = State.InViewer(surface, entryIndex = null, accumulatedDeltaY = 0)
-                SurfaceDecision.ALLOW
+                SurfaceDecision.GRANT_ENTRY
             }
             SurfaceMode.OFF -> SurfaceDecision.ALLOW
         }

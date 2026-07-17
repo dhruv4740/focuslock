@@ -43,14 +43,24 @@ class SurfaceDetectorTest {
     }
 
     @Test
-    fun `one-at-a-time allows entry and the first reel`() {
+    fun `one-at-a-time grants entry to the first reel`() {
         val t = tracker()
-        assertEquals(SurfaceDecision.ALLOW, t.onViewerVisible(reels, SurfaceMode.ONE_AT_A_TIME, 0L))
+        assertEquals(SurfaceDecision.GRANT_ENTRY, t.onViewerVisible(reels, SurfaceMode.ONE_AT_A_TIME, 0L))
         // Same-index scroll events (rebuffer, seekbar drag) must not count as an advance.
         assertEquals(
             SurfaceDecision.ALLOW,
             t.onPagerScrolled(reels, SurfaceMode.ONE_AT_A_TIME, fromIndex = 3, toIndex = 3, scrollDeltaY = 0, nowMs = 100L)
         )
+    }
+
+    @Test
+    fun `GRANT_ENTRY fires once per viewer session, not on repeat presence probes`() {
+        val t = tracker()
+        assertEquals(SurfaceDecision.GRANT_ENTRY, t.onViewerVisible(reels, SurfaceMode.ONE_AT_A_TIME, 0L))
+        // Presence probes fire repeatedly (every ~500ms) while the same reel is on
+        // screen — none of those repeats should grant (and thus count) again.
+        assertEquals(SurfaceDecision.ALLOW, t.onViewerVisible(reels, SurfaceMode.ONE_AT_A_TIME, 50L))
+        assertEquals(SurfaceDecision.ALLOW, t.onViewerVisible(reels, SurfaceMode.ONE_AT_A_TIME, 500L))
     }
 
     @Test
@@ -119,8 +129,8 @@ class SurfaceDetectorTest {
         t.onViewerVisible(reels, SurfaceMode.ONE_AT_A_TIME, 0L)
         t.onPagerScrolled(reels, SurfaceMode.ONE_AT_A_TIME, fromIndex = -1, toIndex = 0, scrollDeltaY = 0, nowMs = 10L)
         t.onViewerGone(200L)
-        // Re-entering starts a brand new one-reel grant.
-        assertEquals(SurfaceDecision.ALLOW, t.onViewerVisible(reels, SurfaceMode.ONE_AT_A_TIME, 300L))
+        // Re-entering starts a brand new one-reel grant — counts as a fresh GRANT_ENTRY.
+        assertEquals(SurfaceDecision.GRANT_ENTRY, t.onViewerVisible(reels, SurfaceMode.ONE_AT_A_TIME, 300L))
         assertEquals(
             SurfaceDecision.ALLOW,
             t.onPagerScrolled(reels, SurfaceMode.ONE_AT_A_TIME, fromIndex = -1, toIndex = 0, scrollDeltaY = 0, nowMs = 310L)
