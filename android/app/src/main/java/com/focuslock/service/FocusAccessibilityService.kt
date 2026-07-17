@@ -1,21 +1,13 @@
 package com.focuslock.service
 
 import android.accessibilityservice.AccessibilityService
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.Intent
-import android.os.Build
 import android.view.accessibility.AccessibilityEvent
-import androidx.core.app.NotificationCompat
-import com.focuslock.R
 import com.focuslock.surface.SurfaceBlocker
 
 class FocusAccessibilityService : AccessibilityService() {
 
     companion object {
-        private const val CHANNEL_ID = "focuslock-accessibility"
-        private const val NOTIFICATION_ID = 1102
-
         // Live reference to the connected service so other components can issue
         // global gestures without owning their own gesture-dispatch path.
         @Volatile private var instance: FocusAccessibilityService? = null
@@ -32,35 +24,16 @@ class FocusAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         SurfaceBlocker.reset()
-        startForegroundServiceNotification()
+        // No startForeground() here: accessibility services are kept alive by the
+        // OS's AccessibilityManager/WindowManagerService binding, not the
+        // foreground-service-kill policy a persistent notification exists to work
+        // around. UsageMonitorService is the one that genuinely needs it.
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
         if (instance === this) instance = null
         SurfaceBlocker.flushNow()
         return super.onUnbind(intent)
-    }
-
-    private fun startForegroundServiceNotification() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "FocusLock Active Shield",
-                NotificationManager.IMPORTANCE_MIN
-            )
-            manager.createNotificationChannel(channel)
-        }
-
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("FocusLock Shield Active")
-            .setContentText("Protecting your focus sessions")
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .build()
-
-        startForeground(NOTIFICATION_ID, notification)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -84,4 +57,3 @@ class FocusAccessibilityService : AccessibilityService() {
         SurfaceBlocker.flushNow()
     }
 }
-

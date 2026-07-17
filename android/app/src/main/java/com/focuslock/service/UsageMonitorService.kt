@@ -63,7 +63,8 @@ class UsageMonitorService : Service() {
     private var localAllowNow = true   // optimistic until first evaluate succeeds
     private var hadSuccessfulEvaluate = false
 
-    private var warningNotificationSent = false
+    private var warningNotificationSentDate = ""
+    private var isForegroundStarted = false
     private var lastPolicyRefreshAt = 0L
     private val POLICY_REFRESH_THROTTLE_MS = 15 * 60 * 1000L
     private var localTimerRunnable: Runnable? = null
@@ -98,7 +99,14 @@ class UsageMonitorService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "onStartCommand: ${intent?.action}")
-        startForeground(NOTIFICATION_ID, buildNotification("Monitoring unproductive usage…"))
+        // Only the first call actually needs to post the notification — this fires
+        // on every foreground-app-change system-wide, and re-posting identical
+        // content on every single app switch all day is pure overhead.
+        // updateForegroundNotice() is what actually changes the visible text.
+        if (!isForegroundStarted) {
+            startForeground(NOTIFICATION_ID, buildNotification("Monitoring unproductive usage…"))
+            isForegroundStarted = true
+        }
 
         when (intent?.action) {
             ACTION_FOREGROUND_CHANGED -> {
@@ -127,6 +135,7 @@ class UsageMonitorService : Service() {
     override fun onDestroy() {
         Log.d(TAG, "onDestroy")
         isServiceActive = false
+        isForegroundStarted = false
         isRunning.set(false)
         networkExecutor.shutdownNow()
 
@@ -343,7 +352,6 @@ class UsageMonitorService : Service() {
 
     private fun startLocalTimer(packageName: String) {
         stopLocalTimer()
-        warningNotificationSent = false
         localTimerRunnable = object : Runnable {
             override fun run() {
                 if (currentForegroundTarget != packageName) return
@@ -352,8 +360,11 @@ class UsageMonitorService : Service() {
                 Log.d(TAG, "Local tracker: %.1f / %d min".format(localUsedMinutes, localEffectiveLimit))
 
                 if (localEffectiveLimit > 0) {
-                    if (!warningNotificationSent && localUsedMinutes >= localEffectiveLimit * 0.8) {
-                        warningNotificationSent = true
+                    // Dated (not per-session) guard — without this, reopening the app
+                    // near the limit re-fired this alert every single time.
+                    val today = LocalDate.now().toString()
+                    if (warningNotificationSentDate != today && localUsedMinutes >= localEffectiveLimit * 0.8) {
+                        warningNotificationSentDate = today
                         sendApproachingLimitNotification(localEffectiveLimit)
                     }
                     if (localUsedMinutes >= localEffectiveLimit) {
