@@ -98,7 +98,10 @@ jobs:
 
       - name: Create GitHub Release
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          # The workflow's own `permissions: contents: write` (top of this
+          # file) is sufficient for gh to create a release in this repo --
+          # no manually-created PAT needed for this step.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${{ github.ref_name }}" \
             --repo "${{ github.repository }}" \
