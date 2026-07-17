@@ -20,8 +20,8 @@ android {
         applicationId = "com.focuslock"
         minSdk = 28
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.3.1"
+        versionCode = 5
+        versionName = "0.4.0"
     }
 
     signingConfigs {
@@ -46,6 +46,13 @@ android {
                 "proguard-rules.pro"
             )
         }
+        debug {
+            // Share the release cert so debug and release builds can install over
+            // each other — otherwise a signature mismatch blocks every OTA update.
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
     }
 
     compileOptions {
@@ -65,4 +72,8 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore-ktx:24.10.0")
     implementation("com.google.firebase:firebase-auth-ktx:22.3.1")
     testImplementation("junit:junit:4.13.2")
+    // Real org.json impl for local unit tests — the Android SDK's org.json is a
+    // stub that throws at runtime outside instrumented/Robolectric tests, and
+    // parseRelease() needs a working JSONObject.
+    testImplementation("org.json:json:20231013")
 }
