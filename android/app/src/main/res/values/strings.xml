@@ -2,5 +2,5 @@
 <resources>
     <string name="app_name">FocusLock</string>
     <string name="device_admin_description">Prevents the uninstallation of FocusLock while blocking features are active.</string>
-    <string name="accessibility_service_description">FocusLock uses this service to detect which app is in the foreground so it can enforce your focus rules and daily limits. It does not read screen content.</string>
+    <string name="accessibility_service_description">FocusLock uses this service to detect which app is in the foreground so it can enforce your focus rules and daily limits. If you enable Reels/Shorts blocking, it also reads on-screen element IDs inside Instagram and YouTube to detect those specific screens — it does not read your messages, photos, or content in other apps.</string>
 </resources>

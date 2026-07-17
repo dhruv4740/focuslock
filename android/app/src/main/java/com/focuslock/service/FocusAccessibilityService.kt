@@ -8,6 +8,7 @@ import android.os.Build
 import android.view.accessibility.AccessibilityEvent
 import androidx.core.app.NotificationCompat
 import com.focuslock.R
+import com.focuslock.surface.SurfaceBlocker
 
 class FocusAccessibilityService : AccessibilityService() {
 
@@ -30,6 +31,7 @@ class FocusAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        SurfaceBlocker.reset()
         startForegroundServiceNotification()
     }
 
@@ -74,6 +76,7 @@ class FocusAccessibilityService : AccessibilityService() {
                 // Fail-safe for background limitations (though accessibility services are immune)
             }
         }
+        SurfaceBlocker.onAccessibilityEvent(event, this)
     }
 
     override fun onInterrupt() {
