@@ -59,6 +59,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var editReelLimitInstagram: EditText
     private lateinit var editReelLimitYoutube: EditText
     private lateinit var txtReelCounts: TextView
+    private lateinit var txtReelsPolicySaved: TextView
 
     // Display labels for the blocked-surfaces spinners, positionally mapped to
     // the wire values stored in PolicyData.blockedSurfaces / SurfaceMode.fromWire.
@@ -101,6 +102,7 @@ class MainActivity : AppCompatActivity() {
         editReelLimitInstagram = findViewById(R.id.editReelLimitInstagram)
         editReelLimitYoutube = findViewById(R.id.editReelLimitYoutube)
         txtReelCounts = findViewById(R.id.txtReelCounts)
+        txtReelsPolicySaved = findViewById(R.id.txtReelsPolicySaved)
         layoutWeeklyChart = findViewById(R.id.layoutWeeklyChart)
 
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -111,6 +113,17 @@ class MainActivity : AppCompatActivity() {
         setupFocusSession()
         setupPolicyEditor()
         setupFrictionSettingsAndHelpCard(prefs)
+
+        setupCollapsible(
+            header = findViewById(R.id.rowBlockingRulesHeader),
+            chevron = findViewById(R.id.chevronBlockingRules),
+            content = findViewById(R.id.layoutBlockingRulesContent)
+        )
+        setupCollapsible(
+            header = findViewById(R.id.rowFrictionHeader),
+            chevron = findViewById(R.id.chevronFriction),
+            content = findViewById(R.id.layoutFrictionContent)
+        )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1201)
@@ -180,6 +193,18 @@ class MainActivity : AppCompatActivity() {
         refreshProtectionStatus()
         refreshDashboardData()
         UpdateChecker.checkForUpdate(this)
+    }
+
+    // ── Collapsible cards ─────────────────────────────────────────────────────
+
+    private fun setupCollapsible(header: View, chevron: TextView, content: View, startExpanded: Boolean = false) {
+        content.visibility = if (startExpanded) View.VISIBLE else View.GONE
+        chevron.text = if (startExpanded) "▾" else "▸"
+        header.setOnClickListener {
+            val expand = content.visibility != View.VISIBLE
+            content.visibility = if (expand) View.VISIBLE else View.GONE
+            chevron.text = if (expand) "▾" else "▸"
+        }
     }
 
     // ── Focus Session ─────────────────────────────────────────────────────────
@@ -298,49 +323,58 @@ class MainActivity : AppCompatActivity() {
             renderBlockWindows()
         }
 
-        // Save policy
+        // Save policy — two entry points (this card and the Reels & Shorts card
+        // above) both save the same full PolicyData, so a change made in either
+        // card can be saved without hunting for "the right" Save button.
         findViewById<Button>(R.id.btnSavePolicy).setOnClickListener { btn ->
-            val policy = currentPolicy ?: return@setOnClickListener
-            val dailyLimit = editDailyLimit.text.toString().trim().toIntOrNull() ?: policy.dailyLimitMinutes
-            val extMins = editExtensionMins.text.toString().trim().toIntOrNull() ?: policy.extensionMinutes
-            val extLimit = editExtensionLimit.text.toString().trim().toIntOrNull() ?: policy.dailyExtensionLimit
-            val blockedSurfaces = mapOf(
-                "instagram_reels" to surfaceModeWireValues[spinnerInstagramReels.selectedItemPosition],
-                "youtube_shorts" to surfaceModeWireValues[spinnerYoutubeShorts.selectedItemPosition]
-            )
-            val reelDailyLimit = mapOf(
-                "instagram_reels" to (editReelLimitInstagram.text.toString().trim().toIntOrNull() ?: 0),
-                "youtube_shorts" to (editReelLimitYoutube.text.toString().trim().toIntOrNull() ?: 0)
-            )
-            val updated = policy.copy(
-                dailyLimitMinutes = dailyLimit,
-                extensionMinutes = extMins,
-                dailyExtensionLimit = extLimit,
-                hardBlockAfterLimit = switchHardBlock.isChecked,
-                blockedSurfaces = blockedSurfaces,
-                reelDailyLimit = reelDailyLimit
-            )
-            currentPolicy = updated
-            btn.isEnabled = false
-            Thread {
-                try {
-                    FocusPolicyClient.updatePolicy(updated)
-                    SurfaceBlocker.updateConfig(blockedSurfaces, reelDailyLimit)
-                    runOnUiThread {
-                        txtPolicySaved.visibility = View.VISIBLE
-                        txtPolicySaved.postDelayed({ txtPolicySaved.visibility = View.GONE }, 2000)
-                        btn.isEnabled = true
-                    }
-                } catch (e: Exception) {
-                    runOnUiThread {
-                        Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                        btn.isEnabled = true
-                    }
-                }
-            }.start()
+            savePolicy(btn, txtPolicySaved)
+        }
+        findViewById<Button>(R.id.btnSaveReelsPolicy).setOnClickListener { btn ->
+            savePolicy(btn, txtReelsPolicySaved)
         }
 
         loadPolicyIntoEditor()
+    }
+
+    private fun savePolicy(btn: View, confirmationView: TextView) {
+        val policy = currentPolicy ?: return
+        val dailyLimit = editDailyLimit.text.toString().trim().toIntOrNull() ?: policy.dailyLimitMinutes
+        val extMins = editExtensionMins.text.toString().trim().toIntOrNull() ?: policy.extensionMinutes
+        val extLimit = editExtensionLimit.text.toString().trim().toIntOrNull() ?: policy.dailyExtensionLimit
+        val blockedSurfaces = mapOf(
+            "instagram_reels" to surfaceModeWireValues[spinnerInstagramReels.selectedItemPosition],
+            "youtube_shorts" to surfaceModeWireValues[spinnerYoutubeShorts.selectedItemPosition]
+        )
+        val reelDailyLimit = mapOf(
+            "instagram_reels" to (editReelLimitInstagram.text.toString().trim().toIntOrNull() ?: 0),
+            "youtube_shorts" to (editReelLimitYoutube.text.toString().trim().toIntOrNull() ?: 0)
+        )
+        val updated = policy.copy(
+            dailyLimitMinutes = dailyLimit,
+            extensionMinutes = extMins,
+            dailyExtensionLimit = extLimit,
+            hardBlockAfterLimit = switchHardBlock.isChecked,
+            blockedSurfaces = blockedSurfaces,
+            reelDailyLimit = reelDailyLimit
+        )
+        currentPolicy = updated
+        btn.isEnabled = false
+        Thread {
+            try {
+                FocusPolicyClient.updatePolicy(updated)
+                SurfaceBlocker.updateConfig(blockedSurfaces, reelDailyLimit)
+                runOnUiThread {
+                    confirmationView.visibility = View.VISIBLE
+                    confirmationView.postDelayed({ confirmationView.visibility = View.GONE }, 2000)
+                    btn.isEnabled = true
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    btn.isEnabled = true
+                }
+            }
+        }.start()
     }
 
     private fun loadPolicyIntoEditor() {
