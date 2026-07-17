@@ -69,6 +69,22 @@ object SurfaceMarkers {
     )
 }
 
+// A feed-embedded reel/short (Instagram home feed, YouTube home feed) can expose the
+// same view IDs as the real fullscreen viewer. The viewer is edge-to-edge; a feed post
+// is at most ~4:5 and moves with scrolling — so gate presence matches on the node
+// filling most of the window, not just matching by ID.
+internal fun isViewerSizedBounds(
+    nodeW: Int,
+    nodeH: Int,
+    windowW: Int,
+    windowH: Int,
+    minHeightFraction: Double = 0.75,
+    minWidthFraction: Double = 0.85
+): Boolean =
+    windowW > 0 && windowH > 0 &&
+        nodeH >= windowH * minHeightFraction &&
+        nodeW >= windowW * minWidthFraction
+
 enum class SurfaceDecision { ALLOW, PRESS_BACK, GRANT_ENTRY }
 
 /**

@@ -1,6 +1,7 @@
 package com.focuslock.surface
 
 import android.accessibilityservice.AccessibilityService
+import android.graphics.Rect
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -215,7 +216,26 @@ object SurfaceBlocker {
 
         val ids = SurfaceMarkers.presenceIds[surface] ?: return null
         val root = service.rootInActiveWindow ?: return null
-        val present = ids.any { id -> !root.findAccessibilityNodeInfosByViewId(id).isNullOrEmpty() }
+        val windowBounds = Rect().also { root.getBoundsInScreen(it) }
+        val nodeBounds = Rect()
+        // A matched view ID alone isn't enough — Instagram/YouTube reuse reel view IDs
+        // for feed-embedded posts, which would otherwise false-positive as the viewer
+        // and trigger a Back press that just refreshes the feed. Require the node to
+        // actually fill the window, which only the real fullscreen viewer does.
+        val present = ids.any { id ->
+            root.findAccessibilityNodeInfosByViewId(id).orEmpty().any { node ->
+                node.isVisibleToUser &&
+                    run {
+                        node.getBoundsInScreen(nodeBounds)
+                        isViewerSizedBounds(
+                            nodeBounds.width(),
+                            nodeBounds.height(),
+                            windowBounds.width(),
+                            windowBounds.height()
+                        )
+                    }
+            }
+        }
 
         if (!present) {
             tracker.onViewerGone(nowMs)
