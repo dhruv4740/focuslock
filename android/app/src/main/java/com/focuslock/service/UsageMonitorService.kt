@@ -16,6 +16,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.focuslock.R
 import com.focuslock.data.FocusPolicyClient
+import com.focuslock.surface.SurfaceBlocker
 import java.time.LocalDate
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -259,6 +260,12 @@ class UsageMonitorService : Service() {
                         targetApps.addAll(apps)
                         Log.d(TAG, "Policy refreshed: targetApps=$targetApps")
                     }
+                }
+                val surfacesJson = policyJson.optJSONObject("blockedSurfaces")
+                if (surfacesJson != null) {
+                    val surfaces = surfacesJson.keys().asSequence()
+                        .associateWith { surfacesJson.getString(it) }
+                    handler.post { SurfaceBlocker.updateConfig(surfaces) }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Policy refresh failed — using cached or previous targets", e)

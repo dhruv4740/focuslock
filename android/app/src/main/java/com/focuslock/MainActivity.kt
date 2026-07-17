@@ -29,6 +29,7 @@ import com.focuslock.update.UpdateChecker
 import com.focuslock.receiver.PolicyDeviceAdminReceiver
 import com.focuslock.security.EnforcementChecks
 import com.focuslock.service.UsageMonitorService
+import com.focuslock.surface.SurfaceBlocker
 import java.time.LocalDate
 
 class MainActivity : AppCompatActivity() {
@@ -53,6 +54,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var editWindowEnd: EditText
     private lateinit var layoutBlockWindows: LinearLayout
     private lateinit var txtPolicySaved: TextView
+    private lateinit var spinnerInstagramReels: Spinner
+    private lateinit var spinnerYoutubeShorts: Spinner
+
+    // Display labels for the blocked-surfaces spinners, positionally mapped to
+    // the wire values stored in PolicyData.blockedSurfaces / SurfaceMode.fromWire.
+    private val surfaceModeLabels = arrayOf("Off", "Block entirely", "One at a time")
+    private val surfaceModeWireValues = arrayOf("off", "block", "one_at_a_time")
 
     // Weekly chart
     private lateinit var layoutWeeklyChart: LinearLayout
@@ -85,6 +93,8 @@ class MainActivity : AppCompatActivity() {
         editWindowEnd = findViewById(R.id.editWindowEnd)
         layoutBlockWindows = findViewById(R.id.layoutBlockWindows)
         txtPolicySaved = findViewById(R.id.txtPolicySaved)
+        spinnerInstagramReels = findViewById(R.id.spinnerInstagramReels)
+        spinnerYoutubeShorts = findViewById(R.id.spinnerYoutubeShorts)
         layoutWeeklyChart = findViewById(R.id.layoutWeeklyChart)
 
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -239,6 +249,11 @@ class MainActivity : AppCompatActivity() {
     // ── Policy Editor ─────────────────────────────────────────────────────────
 
     private fun setupPolicyEditor() {
+        val surfaceModeAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, surfaceModeLabels)
+        surfaceModeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spinnerInstagramReels.adapter = surfaceModeAdapter
+        spinnerYoutubeShorts.adapter = surfaceModeAdapter
+
         // Add target app
         findViewById<Button>(R.id.btnAddTargetApp).setOnClickListener {
             val pkg = editNewTargetApp.text.toString().trim()
@@ -283,17 +298,23 @@ class MainActivity : AppCompatActivity() {
             val dailyLimit = editDailyLimit.text.toString().trim().toIntOrNull() ?: policy.dailyLimitMinutes
             val extMins = editExtensionMins.text.toString().trim().toIntOrNull() ?: policy.extensionMinutes
             val extLimit = editExtensionLimit.text.toString().trim().toIntOrNull() ?: policy.dailyExtensionLimit
+            val blockedSurfaces = mapOf(
+                "instagram_reels" to surfaceModeWireValues[spinnerInstagramReels.selectedItemPosition],
+                "youtube_shorts" to surfaceModeWireValues[spinnerYoutubeShorts.selectedItemPosition]
+            )
             val updated = policy.copy(
                 dailyLimitMinutes = dailyLimit,
                 extensionMinutes = extMins,
                 dailyExtensionLimit = extLimit,
-                hardBlockAfterLimit = switchHardBlock.isChecked
+                hardBlockAfterLimit = switchHardBlock.isChecked,
+                blockedSurfaces = blockedSurfaces
             )
             currentPolicy = updated
             btn.isEnabled = false
             Thread {
                 try {
                     FocusPolicyClient.updatePolicy(updated)
+                    SurfaceBlocker.updateConfig(blockedSurfaces)
                     runOnUiThread {
                         txtPolicySaved.visibility = View.VISIBLE
                         txtPolicySaved.postDelayed({ txtPolicySaved.visibility = View.GONE }, 2000)
@@ -323,6 +344,12 @@ class MainActivity : AppCompatActivity() {
                     switchHardBlock.isChecked = policy.hardBlockAfterLimit
                     renderTargetApps()
                     renderBlockWindows()
+                    spinnerInstagramReels.setSelection(
+                        surfaceModeWireValues.indexOf(policy.blockedSurfaces["instagram_reels"] ?: "off").coerceAtLeast(0)
+                    )
+                    spinnerYoutubeShorts.setSelection(
+                        surfaceModeWireValues.indexOf(policy.blockedSurfaces["youtube_shorts"] ?: "off").coerceAtLeast(0)
+                    )
                 }
             } catch (e: Exception) {
                 // leave fields empty, user can fill in

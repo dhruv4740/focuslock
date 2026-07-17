@@ -169,9 +169,12 @@ object FocusPolicyClient {
                 .collection("policy").document("global").get()
         )
         val data = snap.data ?: return JSONObject()
+        @Suppress("UNCHECKED_CAST")
+        val blockedSurfaces = data["blockedSurfaces"] as? Map<String, String> ?: emptyMap()
         return JSONObject().apply {
             put("targetApps", JSONArray(data["targetApps"] as? List<String> ?: emptyList<String>()))
             put("targetDomains", JSONArray(data["targetDomains"] as? List<String> ?: emptyList<String>()))
+            put("blockedSurfaces", JSONObject(blockedSurfaces))
         }
     }
 
@@ -385,7 +388,8 @@ object FocusPolicyClient {
         val hardBlockAfterLimit: Boolean,
         val targetApps: List<String>,
         val targetDomains: List<String>,
-        val blockWindows: List<Map<String, Any>>
+        val blockWindows: List<Map<String, Any>>,
+        val blockedSurfaces: Map<String, String> = emptyMap()
     )
 
     fun getPolicy(): PolicyData {
@@ -408,7 +412,8 @@ object FocusPolicyClient {
                     "end" to (w["end"] as? String ?: "23:59"),
                     "days" to ((w["days"] as? List<*>)?.map { (it as Number).toInt() } ?: (0..6).toList())
                 )
-            }
+            },
+            blockedSurfaces = (data["blockedSurfaces"] as? Map<String, String>) ?: emptyMap()
         )
     }
 
@@ -426,7 +431,8 @@ object FocusPolicyClient {
                     "end" to (w["end"] as? String ?: "23:59"),
                     "days" to ((w["days"] as? List<*>)?.map { (it as Number).toInt() } ?: (0..6).toList())
                 )
-            }
+            },
+            "blockedSurfaces" to policy.blockedSurfaces
         )
         Tasks.await(
             db.collection("users").document(userId)
