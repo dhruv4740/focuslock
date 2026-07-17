@@ -27,6 +27,10 @@ jobs:
           echo "keyAlias=${{ secrets.KEYSTORE_KEY_ALIAS }}" >> keystore.properties
           echo "keyPassword=${{ secrets.KEYSTORE_KEY_PASSWORD }}" >> keystore.properties
 
+      - name: Ensure gradlew is executable
+        working-directory: android
+        run: chmod +x gradlew
+
       - name: Run unit tests
         working-directory: android
         run: ./gradlew testDebugUnitTest
@@ -53,7 +57,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install dependencies
         working-directory: windows-agent
