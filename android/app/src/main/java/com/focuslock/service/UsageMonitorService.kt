@@ -82,6 +82,18 @@ class UsageMonitorService : Service() {
         isServiceActive = true
         FocusPolicyClient.init(this)
         createNotificationChannels()
+
+        // One-time cold-start seed so the daily reel quota survives a process
+        // restart mid-day instead of silently resetting to zero.
+        networkExecutor.submit {
+            try {
+                val today = LocalDate.now().toString()
+                val counts = FocusPolicyClient.getReelCounts(today)
+                SurfaceBlocker.seedReelCounts(today, counts)
+            } catch (e: Exception) {
+                Log.w(TAG, "Reel count seed failed — starting from zero", e)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -265,7 +277,10 @@ class UsageMonitorService : Service() {
                 if (surfacesJson != null) {
                     val surfaces = surfacesJson.keys().asSequence()
                         .associateWith { surfacesJson.getString(it) }
-                    handler.post { SurfaceBlocker.updateConfig(surfaces) }
+                    val limitsJson = policyJson.optJSONObject("reelDailyLimit")
+                    val limits = limitsJson?.keys()?.asSequence()
+                        ?.associateWith { limitsJson.getInt(it) } ?: emptyMap()
+                    handler.post { SurfaceBlocker.updateConfig(surfaces, limits) }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Policy refresh failed — using cached or previous targets", e)
@@ -278,7 +293,7 @@ class UsageMonitorService : Service() {
     private fun evaluateAndLockIfNeeded(packageName: String) {
         networkExecutor.submit {
             try {
-                val decision = FocusPolicyClient.evaluate(LocalDate.now().toString())
+                val decision = FocusPolicyClient.evaluate(LocalDate.now().toString(), packageName)
 
                 // Persist the result so the offline fallback below uses real data
                 localUsedMinutes = decision.usedMinutes

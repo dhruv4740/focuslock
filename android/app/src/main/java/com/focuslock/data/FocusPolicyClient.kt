@@ -8,6 +8,9 @@ import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.SetOptions
+import com.focuslock.surface.BlockableSurface
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -171,21 +174,32 @@ object FocusPolicyClient {
         val data = snap.data ?: return JSONObject()
         @Suppress("UNCHECKED_CAST")
         val blockedSurfaces = data["blockedSurfaces"] as? Map<String, String> ?: emptyMap()
+        @Suppress("UNCHECKED_CAST")
+        val reelDailyLimit = data["reelDailyLimit"] as? Map<String, Number> ?: emptyMap()
         return JSONObject().apply {
             put("targetApps", JSONArray(data["targetApps"] as? List<String> ?: emptyList<String>()))
             put("targetDomains", JSONArray(data["targetDomains"] as? List<String> ?: emptyList<String>()))
             put("blockedSurfaces", JSONObject(blockedSurfaces))
+            put("reelDailyLimit", JSONObject(reelDailyLimit.mapValues { it.value.toInt() }))
         }
     }
 
     // ── Evaluation (three reads — uses offline cache when network is absent) ──
 
-    fun evaluate(date: String): Decision {
+    fun evaluate(date: String, packageName: String? = null): Decision {
         val policySnap = Tasks.await(
             db.collection("users").document(userId)
                 .collection("policy").document("global").get()
         )
         val policy = policySnap.data ?: mapOf<String, Any>()
+
+        // Apps you've opted into Reels/Shorts surface-blocking on are governed by
+        // that system instead of Block Windows/daily-limit — the only full-app
+        // hard-block trigger left for them is an active Focus Session.
+        @Suppress("UNCHECKED_CAST")
+        val blockedSurfaces = policy["blockedSurfaces"] as? Map<String, String> ?: emptyMap()
+        val surface = packageName?.let { BlockableSurface.byPackage(it) }
+        val isSurfaceManaged = surface != null && (blockedSurfaces[surface.wireKey] ?: "off") != "off"
 
         val usageSnap = Tasks.await(
             db.collection("users").document(userId)
@@ -217,7 +231,7 @@ object FocusPolicyClient {
             val (sh, sm) = startStr.split(":").map { it.toInt() }
             val (eh, em) = endStr.split(":").map { it.toInt() }
             dayOfWeek in days && currentMin in (sh * 60 + sm) until (eh * 60 + em)
-        }
+        } && !isSurfaceManaged
 
         val dailyLimitMinutes = (policy["dailyLimitMinutes"] as? Number)?.toInt() ?: 0
         val extensionMinutes = (policy["extensionMinutes"] as? Number)?.toInt() ?: 15
@@ -239,7 +253,7 @@ object FocusPolicyClient {
             )
         }
 
-        val allowNow = effectiveLimit == 0 || usedMinutes < effectiveLimit
+        val allowNow = isSurfaceManaged || effectiveLimit == 0 || usedMinutes < effectiveLimit
 
         if (!allowNow && hardBlockAfterLimit) {
             return Decision(
@@ -372,11 +386,40 @@ object FocusPolicyClient {
         val data = snap.data ?: mapOf<String, Any>()
         val usedMinutes = data["usedMinutes"] as? Double ?: 0.0
         val opensToday = (data["opensToday"] as? Number)?.toInt() ?: 0
+        @Suppress("UNCHECKED_CAST")
+        val reelCounts = (data["reelCounts"] as? Map<String, Number>) ?: emptyMap()
 
         return JSONObject().apply {
             put("usedMinutes", usedMinutes)
             put("opensToday", opensToday)
+            put("reelCounts", JSONObject(reelCounts.mapValues { it.value.toInt() }))
         }
+    }
+
+    // ── Reel counts ───────────────────────────────────────────────────────────
+
+    fun getReelCounts(date: String): Map<String, Int> {
+        val snap = Tasks.await(
+            db.collection("users").document(userId)
+                .collection("usage_days").document(date).get()
+        )
+        @Suppress("UNCHECKED_CAST")
+        val raw = snap.data?.get("reelCounts") as? Map<String, Number> ?: emptyMap()
+        return raw.mapValues { it.value.toInt() }
+    }
+
+    // One lightweight write per flush (see SurfaceBlocker) rather than a
+    // transaction — nested-map merge creates usage_days/{date} and/or the
+    // reelCounts field if missing, and atomically increments each wireKey via
+    // FieldValue.increment without touching usedMinutes/opensToday.
+    fun incrementReelCounts(date: String, deltas: Map<String, Int>) {
+        if (deltas.isEmpty()) return
+        val usageRef = db.collection("users").document(userId)
+            .collection("usage_days").document(date)
+        val nested = mapOf(
+            "reelCounts" to deltas.mapValues { FieldValue.increment(it.value.toLong()) }
+        )
+        Tasks.await(usageRef.set(nested, SetOptions.merge()))
     }
 
     // ── Policy read/write ─────────────────────────────────────────────────────
@@ -389,7 +432,8 @@ object FocusPolicyClient {
         val targetApps: List<String>,
         val targetDomains: List<String>,
         val blockWindows: List<Map<String, Any>>,
-        val blockedSurfaces: Map<String, String> = emptyMap()
+        val blockedSurfaces: Map<String, String> = emptyMap(),
+        val reelDailyLimit: Map<String, Int> = emptyMap()
     )
 
     fun getPolicy(): PolicyData {
@@ -413,7 +457,9 @@ object FocusPolicyClient {
                     "days" to ((w["days"] as? List<*>)?.map { (it as Number).toInt() } ?: (0..6).toList())
                 )
             },
-            blockedSurfaces = (data["blockedSurfaces"] as? Map<String, String>) ?: emptyMap()
+            blockedSurfaces = (data["blockedSurfaces"] as? Map<String, String>) ?: emptyMap(),
+            reelDailyLimit = ((data["reelDailyLimit"] as? Map<String, Number>) ?: emptyMap())
+                .mapValues { it.value.toInt() }
         )
     }
 
@@ -432,7 +478,8 @@ object FocusPolicyClient {
                     "days" to ((w["days"] as? List<*>)?.map { (it as Number).toInt() } ?: (0..6).toList())
                 )
             },
-            "blockedSurfaces" to policy.blockedSurfaces
+            "blockedSurfaces" to policy.blockedSurfaces,
+            "reelDailyLimit" to policy.reelDailyLimit
         )
         Tasks.await(
             db.collection("users").document(userId)
