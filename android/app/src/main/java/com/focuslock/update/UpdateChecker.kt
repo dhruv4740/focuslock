@@ -1,31 +1,42 @@
 package com.focuslock.update
 
 import android.app.Activity
-import android.app.DownloadManager
-import android.content.BroadcastReceiver
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
+import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
 import android.util.Log
+import android.widget.ProgressBar
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
-import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import com.focuslock.R
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.concurrent.CancellationException
+import java.util.concurrent.atomic.AtomicBoolean
 
 object UpdateChecker {
 
     private const val TAG = "UpdateChecker"
 
     private const val GITHUB_REPO = "dhruv4740/focuslock"
+    private const val APK_FILE_NAME = "focuslock-update.apk"
+
+    internal data class ReleaseInfo(
+        val tagName: String,
+        val apkUrl: String?,
+        val shaUrl: String?,
+        val notes: String
+    )
 
     // A downloaded, checksum-verified APK waiting on the "install unknown apps"
     // permission. Kept so returning from Settings can resume the install
@@ -60,25 +71,7 @@ object UpdateChecker {
                 val body = connection.inputStream.bufferedReader().readText()
                 connection.disconnect()
 
-                val json = JSONObject(body)
-                val tagName = json.optString("tag_name", "") ?: ""
-                if (tagName.isEmpty()) return@Thread
-
-                val assets = json.optJSONArray("assets")
-                var apkUrl: String? = null
-                var shaUrl: String? = null
-                if (assets != null) {
-                    for (i in 0 until assets.length()) {
-                        val asset = assets.getJSONObject(i)
-                        val name = asset.optString("name", "")
-                        val downloadUrl = asset.optString("browser_download_url", "").ifEmpty { null }
-                        if (name.endsWith(".apk")) {
-                            apkUrl = downloadUrl
-                        } else if (name.endsWith(".apk.sha256")) {
-                            shaUrl = downloadUrl
-                        }
-                    }
-                }
+                val info = parseRelease(body) ?: return@Thread
 
                 val currentVersion = try {
                     activity.packageManager.getPackageInfo(activity.packageName, 0).versionName ?: "0.0.0"
@@ -87,34 +80,41 @@ object UpdateChecker {
                     return@Thread
                 }
 
-                if (!isRemoteNewer(tagName, currentVersion)) {
+                if (!isRemoteNewer(info.tagName, currentVersion)) {
                     if (manual) toast(activity, "You're on the latest version ($currentVersion)")
                     return@Thread
                 }
-                if (apkUrl.isNullOrEmpty()) {
-                    if (manual) toast(activity, "Update $tagName found but it has no APK attached")
+                if (info.apkUrl.isNullOrEmpty()) {
+                    if (manual) toast(activity, "Update ${info.tagName} found but it has no APK attached")
                     return@Thread
                 }
 
-                val finalApkUrl = apkUrl
-                val finalShaUrl = shaUrl
-                val displayVersion = tagName.removePrefix("v").removePrefix("V")
+                val displayVersion = info.tagName.removePrefix("v").removePrefix("V")
                 activity.runOnUiThread {
-                    AlertDialog.Builder(activity)
-                        .setTitle("Update available")
-                        .setMessage("FocusLock $displayVersion is available. Update now?")
-                        .setCancelable(true)
-                        .setPositiveButton("Update") { _, _ ->
-                            downloadAndInstall(activity, finalApkUrl, finalShaUrl)
-                        }
-                        .setNegativeButton("Later") { dialog, _ -> dialog.dismiss() }
-                        .show()
+                    showUpdateDialog(activity, currentVersion, displayVersion, info)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Update check failed", e)
                 if (manual) toast(activity, "Update check failed — are you online?")
             }
         }.start()
+    }
+
+    private fun showUpdateDialog(activity: Activity, currentVersion: String, newVersion: String, info: ReleaseInfo) {
+        val view = activity.layoutInflater.inflate(R.layout.dialog_update, null)
+        view.findViewById<TextView>(R.id.txtUpdateVersions).text =
+            "Current: v$currentVersion   →   New: v$newVersion"
+        val notes = info.notes.trim()
+        view.findViewById<TextView>(R.id.txtUpdateNotes).text =
+            notes.ifEmpty { "No release notes provided." }
+
+        AlertDialog.Builder(activity)
+            .setTitle("Update available")
+            .setView(view)
+            .setCancelable(true)
+            .setPositiveButton("Update") { _, _ -> downloadWithProgress(activity, info) }
+            .setNegativeButton("Later") { dialog, _ -> dialog.dismiss() }
+            .show()
     }
 
     /**
@@ -131,7 +131,47 @@ object UpdateChecker {
         }
         if (!activity.packageManager.canRequestPackageInstalls()) return
         pendingVerifiedApk = null
-        launchInstall(activity, apkFile)
+        installApk(activity, apkFile)
+    }
+
+    /** Deletes the fixed-name update APK, e.g. after a successful install. */
+    fun cleanupDownloadedApk(context: Context) {
+        try {
+            val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return
+            File(downloadsDir, APK_FILE_NAME).delete()
+        } catch (e: Exception) {
+            Log.w(TAG, "cleanupDownloadedApk failed", e)
+        }
+    }
+
+    /**
+     * Parses a GitHub "latest release" API response into the fields the updater
+     * needs. Returns null when there's no usable tag name (malformed/empty
+     * response) — a missing APK asset or release-notes body is left null/blank
+     * for the caller to handle.
+     */
+    internal fun parseRelease(body: String): ReleaseInfo? {
+        val json = JSONObject(body)
+        val tagName = json.optString("tag_name", "")
+        if (tagName.isEmpty()) return null
+
+        var apkUrl: String? = null
+        var shaUrl: String? = null
+        val assets = json.optJSONArray("assets")
+        if (assets != null) {
+            for (i in 0 until assets.length()) {
+                val asset = assets.getJSONObject(i)
+                val name = asset.optString("name", "")
+                val downloadUrl = asset.optString("browser_download_url", "").ifEmpty { null }
+                if (name.endsWith(".apk")) {
+                    apkUrl = downloadUrl
+                } else if (name.endsWith(".apk.sha256")) {
+                    shaUrl = downloadUrl
+                }
+            }
+        }
+        val notes = json.optString("body", "")
+        return ReleaseInfo(tagName, apkUrl, shaUrl, notes)
     }
 
     /**
@@ -187,53 +227,107 @@ object UpdateChecker {
         }
     }
 
-    private fun downloadAndInstall(activity: Activity, url: String, shaUrl: String?) {
-        try {
+    private fun downloadWithProgress(activity: Activity, info: ReleaseInfo) {
+        val apkUrl = info.apkUrl ?: return
+        val progressView = activity.layoutInflater.inflate(R.layout.dialog_update_progress, null)
+        val statusText = progressView.findViewById<TextView>(R.id.txtUpdateStatus)
+        val progressBar = progressView.findViewById<ProgressBar>(R.id.progressUpdate)
+        val percentText = progressView.findViewById<TextView>(R.id.txtUpdatePercent)
+        val cancelled = AtomicBoolean(false)
+
+        val dialog = AlertDialog.Builder(activity)
+            .setTitle("Updating FocusLock")
+            .setView(progressView)
+            .setCancelable(false)
+            .setNegativeButton("Cancel") { d, _ ->
+                cancelled.set(true)
+                d.dismiss()
+            }
+            .create()
+        dialog.show()
+
+        Thread {
             val downloadsDir = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-                ?: return
-            val apkFile = File(downloadsDir, "focuslock-update.apk")
-            if (apkFile.exists()) apkFile.delete()
+            if (downloadsDir == null) {
+                activity.runOnUiThread { dialog.dismiss() }
+                toast(activity, "Update failed — storage unavailable")
+                return@Thread
+            }
+            val apkFile = File(downloadsDir, APK_FILE_NAME)
+            try {
+                if (apkFile.exists()) apkFile.delete()
 
-            val dm = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            val request = DownloadManager.Request(Uri.parse(url))
-                .setTitle("FocusLock update")
-                .setDestinationUri(Uri.fromFile(apkFile))
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            val downloadId = dm.enqueue(request)
+                val connection = URL(apkUrl).openConnection() as HttpURLConnection
+                connection.connectTimeout = 10_000
+                connection.readTimeout = 10_000
+                connection.instanceFollowRedirects = true
 
-            val receiver = object : BroadcastReceiver() {
-                override fun onReceive(context: Context, intent: Intent) {
-                    val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
-                    if (id != downloadId) return
-                    try {
-                        activity.unregisterReceiver(this)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Unregister receiver failed", e)
-                    }
+                val responseCode = connection.responseCode
+                if (responseCode != HttpURLConnection.HTTP_OK) {
+                    activity.runOnUiThread { dialog.dismiss() }
+                    toast(activity, "Download failed (server returned $responseCode)")
+                    return@Thread
+                }
 
-                    if (!shaUrl.isNullOrEmpty()) {
-                        val expected = fetchText(shaUrl)?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.lowercase()
-                        if (expected != null) {
-                            val actual = try {
-                                sha256Hex(apkFile)
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Hash check failed", e)
-                                null
-                            }
-                            if (actual == null || !actual.equals(expected, ignoreCase = true)) {
-                                Log.w(TAG, "APK checksum mismatch, aborting install")
-                                apkFile.delete()
-                                Toast.makeText(activity, "Update failed verification", Toast.LENGTH_LONG).show()
-                                return
+                val totalBytes = connection.contentLengthLong
+                activity.runOnUiThread { progressBar.isIndeterminate = totalBytes <= 0 }
+
+                var bytesRead = 0L
+                var lastPercent = -1
+                connection.inputStream.use { input ->
+                    apkFile.outputStream().use { output ->
+                        val buffer = ByteArray(8192)
+                        while (true) {
+                            if (cancelled.get()) throw CancellationException("Update download cancelled")
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            output.write(buffer, 0, read)
+                            bytesRead += read
+                            if (totalBytes > 0) {
+                                val percent = ((bytesRead * 100) / totalBytes).toInt()
+                                if (percent != lastPercent) {
+                                    lastPercent = percent
+                                    activity.runOnUiThread {
+                                        progressBar.progress = percent
+                                        percentText.text = "$percent%"
+                                    }
+                                }
                             }
                         }
                     }
+                }
+                connection.disconnect()
 
-                    if (!activity.packageManager.canRequestPackageInstalls()) {
-                        // Keep the verified APK around — when the user grants the
-                        // permission and comes back, resumePendingInstall() picks
-                        // it up with no re-download.
-                        pendingVerifiedApk = apkFile
+                activity.runOnUiThread { statusText.text = "Verifying…" }
+
+                if (!info.shaUrl.isNullOrEmpty()) {
+                    val expected = fetchText(info.shaUrl)?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.lowercase()
+                    if (expected != null) {
+                        val actual = try {
+                            sha256Hex(apkFile)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Hash check failed", e)
+                            null
+                        }
+                        if (actual == null || !actual.equals(expected, ignoreCase = true)) {
+                            Log.w(TAG, "APK checksum mismatch, aborting install")
+                            apkFile.delete()
+                            activity.runOnUiThread {
+                                dialog.dismiss()
+                                Toast.makeText(activity, "Update failed verification", Toast.LENGTH_LONG).show()
+                            }
+                            return@Thread
+                        }
+                    }
+                }
+
+                if (!activity.packageManager.canRequestPackageInstalls()) {
+                    // Keep the verified APK around — when the user grants the
+                    // permission and comes back, resumePendingInstall() picks
+                    // it up with no re-download.
+                    pendingVerifiedApk = apkFile
+                    activity.runOnUiThread {
+                        dialog.dismiss()
                         Toast.makeText(
                             activity,
                             "Allow FocusLock to install updates — the update will continue when you return",
@@ -248,25 +342,62 @@ object UpdateChecker {
                         } catch (e: Exception) {
                             Log.w(TAG, "Could not open unknown-sources settings", e)
                         }
-                        return
                     }
+                    return@Thread
+                }
 
-                    launchInstall(activity, apkFile)
+                activity.runOnUiThread {
+                    statusText.text = "Installing…"
+                    progressBar.isIndeterminate = true
+                }
+                installApk(activity, apkFile)
+                activity.runOnUiThread { dialog.dismiss() }
+            } catch (e: CancellationException) {
+                apkFile.delete()
+                Log.d(TAG, "Update download cancelled by user")
+            } catch (e: Exception) {
+                Log.w(TAG, "Update download failed", e)
+                apkFile.delete()
+                activity.runOnUiThread {
+                    dialog.dismiss()
+                    Toast.makeText(activity, "Update failed — are you online?", Toast.LENGTH_LONG).show()
                 }
             }
+        }.start()
+    }
 
-            val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                ContextCompat.registerReceiver(activity, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-            } else {
-                activity.registerReceiver(receiver, filter)
+    /**
+     * Installs via a PackageInstaller session so the app stays in control of the
+     * flow (vs. handing the user off to "open this downloaded file"). Android
+     * still shows its own confirmation dialog for a sideloaded app — that part
+     * can't be skipped. Falls back to the legacy ACTION_VIEW/FileProvider flow
+     * if session creation fails for any reason.
+     */
+    private fun installApk(activity: Activity, apkFile: File) {
+        try {
+            val installer = activity.packageManager.packageInstaller
+            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+                setAppPackageName(activity.packageName)
+            }
+            val sessionId = installer.createSession(params)
+            installer.openSession(sessionId).use { session ->
+                session.openWrite(APK_FILE_NAME, 0, apkFile.length()).use { out ->
+                    apkFile.inputStream().use { it.copyTo(out) }
+                    session.fsync(out)
+                }
+                val statusIntent = Intent(activity, InstallStatusReceiver::class.java)
+                val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                    (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+                val pendingIntent = PendingIntent.getBroadcast(activity, sessionId, statusIntent, flags)
+                session.commit(pendingIntent.intentSender)
             }
         } catch (e: Exception) {
-            Log.w(TAG, "downloadAndInstall failed", e)
+            Log.w(TAG, "PackageInstaller session failed, falling back to legacy install", e)
+            launchInstallLegacy(activity, apkFile)
         }
     }
 
-    private fun launchInstall(activity: Activity, apkFile: File) {
+    private fun launchInstallLegacy(activity: Activity, apkFile: File) {
         try {
             val uri = FileProvider.getUriForFile(
                 activity,
