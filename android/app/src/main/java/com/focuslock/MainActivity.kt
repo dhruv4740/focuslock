@@ -192,6 +192,20 @@ class MainActivity : AppCompatActivity() {
 
         refreshProtectionStatus()
         refreshDashboardData()
+
+        val versionName = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+        } catch (e: Exception) {
+            "?"
+        }
+        findViewById<TextView>(R.id.txtAppVersion).apply {
+            text = "v$versionName · tap to check for updates"
+            setOnClickListener {
+                Toast.makeText(this@MainActivity, "Checking for updates…", Toast.LENGTH_SHORT).show()
+                UpdateChecker.checkForUpdate(this@MainActivity, manual = true)
+            }
+        }
+
         UpdateChecker.checkForUpdate(this)
     }
 
@@ -603,6 +617,7 @@ class MainActivity : AppCompatActivity() {
         val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val adminComponent = ComponentName(this, PolicyDeviceAdminReceiver::class.java)
         switchDeviceAdmin.isChecked = dpm.isAdminActive(adminComponent)
+        UpdateChecker.resumePendingInstall(this)
     }
 
     // ── Status & Dashboard ────────────────────────────────────────────────────

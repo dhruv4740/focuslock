@@ -2,7 +2,7 @@
   "name": "focuslock-windows-agent",
   "private": true,
   "type": "module",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "FocusLock desktop focus agent",
   "author": "FocusLock",
   "main": "src/main.js",

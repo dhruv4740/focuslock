@@ -27,7 +27,20 @@ object UpdateChecker {
 
     private const val GITHUB_REPO = "dhruv4740/focuslock"
 
-    fun checkForUpdate(activity: Activity) {
+    // A downloaded, checksum-verified APK waiting on the "install unknown apps"
+    // permission. Kept so returning from Settings can resume the install
+    // directly instead of forcing a re-download.
+    @Volatile private var pendingVerifiedApk: File? = null
+
+    private fun toast(activity: Activity, message: String) {
+        activity.runOnUiThread { Toast.makeText(activity, message, Toast.LENGTH_LONG).show() }
+    }
+
+    /**
+     * [manual] = user tapped "check for updates": give toast feedback for the
+     * up-to-date and failure cases. The automatic launch check stays silent.
+     */
+    fun checkForUpdate(activity: Activity, manual: Boolean = false) {
         Thread {
             try {
                 val apiUrl = "https://api.github.com/repos/$GITHUB_REPO/releases/latest"
@@ -40,6 +53,7 @@ object UpdateChecker {
                 val responseCode = connection.responseCode
                 if (responseCode != HttpURLConnection.HTTP_OK) {
                     Log.w(TAG, "GitHub API returned $responseCode")
+                    if (manual) toast(activity, "Update check failed (server returned $responseCode)")
                     return@Thread
                 }
 
@@ -73,8 +87,14 @@ object UpdateChecker {
                     return@Thread
                 }
 
-                if (!isRemoteNewer(tagName, currentVersion)) return@Thread
-                if (apkUrl.isNullOrEmpty()) return@Thread
+                if (!isRemoteNewer(tagName, currentVersion)) {
+                    if (manual) toast(activity, "You're on the latest version ($currentVersion)")
+                    return@Thread
+                }
+                if (apkUrl.isNullOrEmpty()) {
+                    if (manual) toast(activity, "Update $tagName found but it has no APK attached")
+                    return@Thread
+                }
 
                 val finalApkUrl = apkUrl
                 val finalShaUrl = shaUrl
@@ -92,8 +112,26 @@ object UpdateChecker {
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Update check failed", e)
+                if (manual) toast(activity, "Update check failed — are you online?")
             }
         }.start()
+    }
+
+    /**
+     * Call from Activity.onResume(). If an update APK was downloaded and
+     * verified but installation was blocked on the "install unknown apps"
+     * permission, and that permission has since been granted (user returning
+     * from Settings), fire the install now instead of making them re-download.
+     */
+    fun resumePendingInstall(activity: Activity) {
+        val apkFile = pendingVerifiedApk ?: return
+        if (!apkFile.exists()) {
+            pendingVerifiedApk = null
+            return
+        }
+        if (!activity.packageManager.canRequestPackageInstalls()) return
+        pendingVerifiedApk = null
+        launchInstall(activity, apkFile)
     }
 
     /**
@@ -192,9 +230,13 @@ object UpdateChecker {
                     }
 
                     if (!activity.packageManager.canRequestPackageInstalls()) {
+                        // Keep the verified APK around — when the user grants the
+                        // permission and comes back, resumePendingInstall() picks
+                        // it up with no re-download.
+                        pendingVerifiedApk = apkFile
                         Toast.makeText(
                             activity,
-                            "Allow FocusLock to install updates, then tap Update again",
+                            "Allow FocusLock to install updates — the update will continue when you return",
                             Toast.LENGTH_LONG
                         ).show()
                         try {
@@ -209,21 +251,7 @@ object UpdateChecker {
                         return
                     }
 
-                    try {
-                        val uri = FileProvider.getUriForFile(
-                            activity,
-                            "com.focuslock.fileprovider",
-                            apkFile
-                        )
-                        val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(uri, "application/vnd.android.package-archive")
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        activity.startActivity(installIntent)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Install intent failed", e)
-                    }
+                    launchInstall(activity, apkFile)
                 }
             }
 
@@ -235,6 +263,24 @@ object UpdateChecker {
             }
         } catch (e: Exception) {
             Log.w(TAG, "downloadAndInstall failed", e)
+        }
+    }
+
+    private fun launchInstall(activity: Activity, apkFile: File) {
+        try {
+            val uri = FileProvider.getUriForFile(
+                activity,
+                "com.focuslock.fileprovider",
+                apkFile
+            )
+            val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            activity.startActivity(installIntent)
+        } catch (e: Exception) {
+            Log.w(TAG, "Install intent failed", e)
         }
     }
 }
