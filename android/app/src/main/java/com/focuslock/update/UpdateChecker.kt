@@ -9,7 +9,9 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.Settings
 import android.util.Log
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -17,6 +19,7 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 
 object UpdateChecker {
 
@@ -25,8 +28,6 @@ object UpdateChecker {
     private const val GITHUB_REPO = "dhruv4740/focuslock"
 
     fun checkForUpdate(activity: Activity) {
-        if (GITHUB_REPO == "OWNER/REPO") return
-
         Thread {
             try {
                 val apiUrl = "https://api.github.com/repos/$GITHUB_REPO/releases/latest"
@@ -51,18 +52,20 @@ object UpdateChecker {
 
                 val assets = json.optJSONArray("assets")
                 var apkUrl: String? = null
+                var shaUrl: String? = null
                 if (assets != null) {
                     for (i in 0 until assets.length()) {
                         val asset = assets.getJSONObject(i)
                         val name = asset.optString("name", "")
+                        val downloadUrl = asset.optString("browser_download_url", "").ifEmpty { null }
                         if (name.endsWith(".apk")) {
-                            apkUrl = asset.optString("browser_download_url", null)
-                            break
+                            apkUrl = downloadUrl
+                        } else if (name.endsWith(".apk.sha256")) {
+                            shaUrl = downloadUrl
                         }
                     }
                 }
 
-                val remoteVersion = tagName.removePrefix("v")
                 val currentVersion = try {
                     activity.packageManager.getPackageInfo(activity.packageName, 0).versionName ?: "0.0.0"
                 } catch (e: Exception) {
@@ -70,17 +73,19 @@ object UpdateChecker {
                     return@Thread
                 }
 
-                if (!isRemoteNewer(remoteVersion, currentVersion)) return@Thread
+                if (!isRemoteNewer(tagName, currentVersion)) return@Thread
                 if (apkUrl.isNullOrEmpty()) return@Thread
 
                 val finalApkUrl = apkUrl
+                val finalShaUrl = shaUrl
+                val displayVersion = tagName.removePrefix("v").removePrefix("V")
                 activity.runOnUiThread {
                     AlertDialog.Builder(activity)
                         .setTitle("Update available")
-                        .setMessage("FocusLock $remoteVersion is available. Update now?")
+                        .setMessage("FocusLock $displayVersion is available. Update now?")
                         .setCancelable(true)
                         .setPositiveButton("Update") { _, _ ->
-                            downloadAndInstall(activity, finalApkUrl, remoteVersion)
+                            downloadAndInstall(activity, finalApkUrl, finalShaUrl)
                         }
                         .setNegativeButton("Later") { dialog, _ -> dialog.dismiss() }
                         .show()
@@ -91,9 +96,21 @@ object UpdateChecker {
         }.start()
     }
 
-    private fun isRemoteNewer(remote: String, current: String): Boolean {
-        val remoteParts = remote.split(".").map { it.toIntOrNull() ?: 0 }
-        val currentParts = current.split(".").map { it.toIntOrNull() ?: 0 }
+    /**
+     * Compares a GitHub release tag (e.g. "v1.2.3", "V0.3.0", "0.10.0-beta") against
+     * the installed versionName. Tolerant of missing/uppercase "v" prefix and
+     * pre-release/build-metadata suffixes; non-numeric segments count as 0.
+     */
+    internal fun isRemoteNewer(remoteTag: String, current: String): Boolean {
+        fun parse(v: String): List<Int> = v.trim()
+            .removePrefix("v").removePrefix("V")
+            .substringBefore('+')
+            .substringBefore('-')
+            .split(".")
+            .map { seg -> seg.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
+
+        val remoteParts = parse(remoteTag)
+        val currentParts = parse(current)
         val maxLen = maxOf(remoteParts.size, currentParts.size)
         for (i in 0 until maxLen) {
             val r = remoteParts.getOrElse(i) { 0 }
@@ -104,7 +121,35 @@ object UpdateChecker {
         return false
     }
 
-    private fun downloadAndInstall(activity: Activity, url: String, remoteVersion: String) {
+    private fun sha256Hex(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(8192)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun fetchText(url: String): String? {
+        return try {
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 10_000
+            if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
+            val text = connection.inputStream.bufferedReader().readText()
+            connection.disconnect()
+            text
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to fetch $url", e)
+            null
+        }
+    }
+
+    private fun downloadAndInstall(activity: Activity, url: String, shaUrl: String?) {
         try {
             val downloadsDir = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                 ?: return
@@ -127,6 +172,43 @@ object UpdateChecker {
                     } catch (e: Exception) {
                         Log.w(TAG, "Unregister receiver failed", e)
                     }
+
+                    if (!shaUrl.isNullOrEmpty()) {
+                        val expected = fetchText(shaUrl)?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.lowercase()
+                        if (expected != null) {
+                            val actual = try {
+                                sha256Hex(apkFile)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Hash check failed", e)
+                                null
+                            }
+                            if (actual == null || !actual.equals(expected, ignoreCase = true)) {
+                                Log.w(TAG, "APK checksum mismatch, aborting install")
+                                apkFile.delete()
+                                Toast.makeText(activity, "Update failed verification", Toast.LENGTH_LONG).show()
+                                return
+                            }
+                        }
+                    }
+
+                    if (!activity.packageManager.canRequestPackageInstalls()) {
+                        Toast.makeText(
+                            activity,
+                            "Allow FocusLock to install updates, then tap Update again",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        try {
+                            val settingsIntent = Intent(
+                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                Uri.parse("package:${activity.packageName}")
+                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            activity.startActivity(settingsIntent)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Could not open unknown-sources settings", e)
+                        }
+                        return
+                    }
+
                     try {
                         val uri = FileProvider.getUriForFile(
                             activity,
@@ -147,7 +229,7 @@ object UpdateChecker {
 
             val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                ContextCompat.registerReceiver(activity, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
+                ContextCompat.registerReceiver(activity, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
             } else {
                 activity.registerReceiver(receiver, filter)
             }

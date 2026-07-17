@@ -20,6 +20,7 @@ import android.widget.TextView
 import android.widget.Toast
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import com.focuslock.data.FocusPolicyClient
@@ -104,7 +105,32 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
         }
         findViewById<Button>(R.id.btnAccessibility).setOnClickListener {
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                AlertDialog.Builder(this)
+                    .setTitle("Accessibility toggle greyed out?")
+                    .setMessage(
+                        "Android blocks this permission for apps installed outside the " +
+                        "Play Store (\"Restricted settings\") — this is normal for a " +
+                        "sideloaded APK like FocusLock, not a bug.\n\n" +
+                        "To fix it:\n" +
+                        "1. Open FocusLock's App info (long-press the app icon → App info).\n" +
+                        "2. Tap the ⋮ menu in the top-right corner.\n" +
+                        "3. Tap \"Allow restricted settings\".\n" +
+                        "4. Come back here and enable FocusLock under Accessibility."
+                    )
+                    .setPositiveButton("Open App info") { _, _ ->
+                        startActivity(Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:$packageName")
+                        ))
+                    }
+                    .setNegativeButton("Open Accessibility settings") { _, _ ->
+                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    }
+                    .show()
+            } else {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
         }
         findViewById<Button>(R.id.btnOverlay).setOnClickListener {
             if (!Settings.canDrawOverlays(this)) {

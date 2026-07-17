@@ -118,9 +118,46 @@ object FocusPolicyClient {
         }
     }
 
+    // Firestore rules gate access to users/{userId} on membership in a
+    // `members` allowlist (see firestore.rules). Join it once per (userId,
+    // process) — FirebaseAuth persists the anonymous uid natively across app
+    // restarts, so re-running this after the first successful join is a cheap
+    // no-op on the read side, but we still memoize to avoid a transaction on
+    // every single db access.
+    @Volatile
+    private var membershipEnsuredFor: String? = null
+
+    private fun ensureMembership() {
+        if (membershipEnsuredFor == userId) return
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        try {
+            val userRef = FirebaseFirestore.getInstance().collection("users").document(userId)
+            Tasks.await(FirebaseFirestore.getInstance().runTransaction { tx ->
+                val snap = tx.get(userRef)
+                if (!snap.exists()) {
+                    tx.set(userRef, mapOf(
+                        "members" to listOf(uid),
+                        "createdAt" to java.time.Instant.now().toString()
+                    ))
+                } else {
+                    @Suppress("UNCHECKED_CAST")
+                    val members = (snap.get("members") as? List<String>) ?: emptyList()
+                    if (uid !in members) {
+                        tx.update(userRef, "members", members + uid)
+                    }
+                }
+                null
+            })
+            membershipEnsuredFor = userId
+        } catch (e: Exception) {
+            Log.w(TAG, "ensureMembership failed", e)
+        }
+    }
+
     private val db: FirebaseFirestore
         get() {
             ensureSignedIn()
+            ensureMembership()
             return FirebaseFirestore.getInstance()
         }
 

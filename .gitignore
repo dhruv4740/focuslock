@@ -8,7 +8,10 @@ windows-agent/dist/
 # Android
 .gradle/
 local.properties
-**/build/
+android/**/build/
+*.jks
+*.keystore
+android/keystore.properties
 
 # IDE
 .vscode/
