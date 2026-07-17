@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Write keystore.properties from secrets
+        working-directory: android
+        run: |
+          echo "storeFile=focuslock.jks" > keystore.properties
+          echo "storePassword=${{ secrets.KEYSTORE_STORE_PASSWORD }}" >> keystore.properties
+          echo "keyAlias=${{ secrets.KEYSTORE_KEY_ALIAS }}" >> keystore.properties
+          echo "keyPassword=${{ secrets.KEYSTORE_KEY_PASSWORD }}" >> keystore.properties
+
+      - name: Run unit tests
+        working-directory: android
+        run: ./gradlew testDebugUnitTest
+
+      - name: Build signed release APK
+        working-directory: android
+        run: ./gradlew assembleRelease
+
+      - name: Compute APK checksum
+        working-directory: android/app/build/outputs/apk/release
+        run: sha256sum app-release.apk | cut -d ' ' -f1 > app-release.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android/app/build/outputs/apk/release/app-release.apk.sha256
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: windows-agent
+        run: npm ci
+
+      - name: Run tests
+        working-directory: windows-agent
+        run: npm test
+
+      - name: Build NSIS installer
+        working-directory: windows-agent
+        run: npm run dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            windows-agent/dist/FocusLock-Setup-*.exe
+            windows-agent/dist/latest.yml
+
+  publish:
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-release
+          path: android-release
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: windows-release
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            android-release/app-release.apk \
+            android-release/app-release.apk.sha256 \
+            windows-release/FocusLock-Setup-*.exe \
+            windows-release/latest.yml
