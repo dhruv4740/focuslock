@@ -17,6 +17,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
+import com.focuslock.surface.BlockableSurface
+import com.focuslock.surface.SurfaceBlocker
 import kotlin.math.abs
 
 class TimerOverlayService : Service() {
@@ -180,7 +182,16 @@ class TimerOverlayService : Service() {
         val minutes = totalSeconds / 60
         val seconds = totalSeconds % 60
 
-        timerView?.text = "$minutes:${String.format("%02d", seconds)}"
+        val timeText = "$minutes:${String.format("%02d", seconds)}"
+        timerView?.text = currentTarget?.let { BlockableSurface.byPackage(it) }
+            ?.let { SurfaceBlocker.statusFor(it) }
+            ?.takeIf { it.enabled }
+            ?.let { status ->
+                val reelText = if (status.limit > 0) "${status.count}/${status.limit}" else "${status.count} reels"
+                val suffix = if (status.blocked) " ⛔" else ""
+                "$timeText · $reelText$suffix"
+            }
+            ?: timeText
 
         // Change color as time increases
         timerView?.setBackgroundColor(

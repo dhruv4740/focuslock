@@ -43,6 +43,21 @@ object SurfaceBlocker {
     val isActive: Boolean
         get() = modes.values.any { it != SurfaceMode.OFF }
 
+    /** Read-only snapshot for the overlay badge — no side effects. */
+    data class ReelStatus(val enabled: Boolean, val count: Int, val limit: Int, val blocked: Boolean)
+
+    fun statusFor(surface: BlockableSurface): ReelStatus {
+        val configured = modes[surface] ?: SurfaceMode.OFF
+        val limit = reelLimits[surface] ?: 0
+        val count = reelCounts[surface] ?: 0
+        return ReelStatus(
+            enabled = configured != SurfaceMode.OFF,
+            count = count,
+            limit = limit,
+            blocked = limit > 0 && count >= limit
+        )
+    }
+
     /** Called from UsageMonitorService.refreshPolicy() and after a policy Save. */
     fun updateConfig(wire: Map<String, String>, reelLimits: Map<String, Int> = emptyMap()) {
         modes = BlockableSurface.entries.associateWith { SurfaceMode.fromWire(wire[it.wireKey]) }
