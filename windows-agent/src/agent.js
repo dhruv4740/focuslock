@@ -1,12 +1,21 @@
 import activeWin from "active-win";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { basename } from "node:path";
 import { promisify } from "node:util";
+import readline from "node:readline";
 import { INTERVALS } from "./config.js";
 import { getActiveProfileName, getActiveProfileTargets } from "./profiles.js";
+import {
+  isUnderLimit,
+  parseUrlHelper,
+  matchTargetDomain,
+  isInScheduledBlockWindow,
+  getTodayString,
+  addDays
+} from "./logic.js";
 
-import { db, doc, onSnapshot, runTransaction, collection, addDoc, USER_ID } from "./firebase.js";
+import { db, doc, getDoc, setDoc, onSnapshot, runTransaction, collection, addDoc, USER_ID } from "./firebase.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -35,16 +44,6 @@ function updateCachedTargets() {
     }
   }
   state.cachedTargetBases = bases;
-}
-
-// Use local calendar date so daily limits reset at local midnight,
-// not at UTC midnight (which is 05:30 IST — mid-morning).
-function getTodayString() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
 }
 
 function nowIso() {
@@ -140,16 +139,12 @@ function setupFirebaseListeners() {
   }
   subscribeUsage();
 
-  // Roll over at local midnight: record streak outcome for the day that ended, then resubscribe
+  // Roll over at local midnight: record streak outcome for elapsed day(s), then resubscribe.
+  // This 60s interval only fires while the process is running — see checkDayRollover's
+  // callers in main.js (powerMonitor 'resume'/'unlock-screen') for the sleep/shutdown case.
   setInterval(async () => {
     if (getTodayString() !== trackedDate) {
-      const prevDate = trackedDate;
-      const policy = state.policy;
-      const effectiveLimit =
-        (policy?.dailyLimitMinutes ?? 0) +
-        (state.usage?.extensionsUsedToday ?? 0) * (policy?.extensionMinutes ?? 15);
-      const underLimit = effectiveLimit === 0 || (state.usage?.usedMinutes ?? 0) < effectiveLimit;
-      await recordStreakOutcome(prevDate, underLimit);
+      await checkDayRollover();
       console.log("[usage] new day — re-subscribing usage listener");
       subscribeUsage();
     }
@@ -227,84 +222,129 @@ async function killTargetProcess(processName) {
   }
 }
 
+// The main monitor loop only acts on the foreground window, so a blocked app
+// running in the background (never brought to front) was never enforced.
+// This periodic sweep closes that gap for apps (taskkill /IM already kills
+// every instance of a name, so this doesn't need per-window targeting).
+// Browser tabs can't be swept this way — a background tab is invisible to
+// this process short of automating every open browser window, so domain
+// blocking still only fires when that tab is foregrounded.
+async function sweepBackgroundTargets() {
+  if (!state.policy || state.cachedTargetBases.size === 0) return;
+
+  const blockingActive =
+    isFocusSessionActive() ||
+    isInScheduledBlockWindow(state.policy.blockWindows) ||
+    (state.policy.hardBlockAfterLimit && !isUnderLimit(state.policy, state.usage));
+  if (!blockingActive) return;
+
+  try {
+    const { stdout } = await execFileAsync("tasklist", ["/FO", "CSV", "/NH"]);
+    const killed = new Set();
+    for (const line of stdout.split(/\r?\n/)) {
+      const match = line.match(/^"([^"]+)"/);
+      if (!match) continue;
+      const imageName = match[1];
+      if (killed.has(imageName)) continue;
+      const lower = imageName.toLowerCase();
+      const base = lower.endsWith(".exe") ? lower.slice(0, -4) : lower;
+      if (state.cachedTargetBases.has(base)) {
+        killed.add(imageName);
+        await killTargetProcess(imageName);
+      }
+    }
+  } catch (error) {
+    console.error(`[enforce] background sweep failed: ${String(error)}`);
+  }
+}
+
 // Closes the active browser tab with a real Ctrl+W via SendInput. PostMessage
 // of WM_KEYDOWN does NOT work on Chromium: Chrome reads modifier state through
 // GetKeyState, which PostMessage never updates, so a posted 'W' is seen as a
 // plain keypress with Ctrl not held. SendInput injects into the system input
 // stream and updates global key state, so the browser sees a genuine Ctrl+W.
-// SendInput targets the foreground window — which is exactly the window we
-// enforce on, since the monitor only acts on the active window. We re-assert
-// foreground on the target hwnd first so a stray focus change can't misfire it.
+//
+// The SendInput + Add-Type C# compile is delegated to a single persistent
+// PowerShell child process (see close-window-helper.ps1) instead of spawning
+// powershell.exe fresh on every tick — that spawn+compile cost (hundreds of
+// ms) was paid every 4s while blocked. The helper verifies the target window
+// is still foreground (GetForegroundWindow) right before sending the
+// keystroke; if focus moved elsewhere in the interim (SetForegroundWindow can
+// silently fail under Windows' foreground-lock rules) it reports SKIP instead
+// of blindly firing Ctrl+W into whatever the user is now looking at.
+const closeWindowHelperScriptPath = fileURLToPath(
+  new URL("../scripts/close-window-helper.ps1", import.meta.url)
+);
+
+let psHelper = null; // { proc, rl, busy: Promise }
+
+function spawnPsHelper() {
+  const proc = spawn(
+    "powershell",
+    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", closeWindowHelperScriptPath],
+    { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] }
+  );
+  const rl = readline.createInterface({ input: proc.stdout });
+  proc.stderr.on("data", (d) => console.error(`[enforce] close-window helper stderr: ${d}`));
+  proc.on("exit", (code) => {
+    console.log(`[enforce] close-window helper exited (code=${code})`);
+    if (psHelper && psHelper.proc === proc) psHelper = null;
+  });
+  psHelper = { proc, rl, busy: Promise.resolve() };
+  return psHelper;
+}
+
+function ensurePsHelper() {
+  if (!psHelper || psHelper.proc.exitCode !== null) return spawnPsHelper();
+  return psHelper;
+}
+
+function sendToPsHelper(hwnd) {
+  const helper = ensurePsHelper();
+  const run = helper.busy.then(
+    () =>
+      new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          helper.rl.removeListener("line", onLine);
+          reject(new Error("close-window helper timed out"));
+        }, 3000);
+        function onLine(line) {
+          clearTimeout(timeout);
+          helper.rl.removeListener("line", onLine);
+          resolve(line.trim());
+        }
+        helper.rl.on("line", onLine);
+        helper.proc.stdin.write(`${hwnd}\n`);
+      })
+  );
+  // Keep the chain alive even if this call errors/times out, so the next
+  // caller doesn't wait on a rejected promise forever.
+  helper.busy = run.then(
+    () => {},
+    () => {}
+  );
+  return run;
+}
+
 async function closeWindow(windowId, targetName) {
   if (!windowId) return;
   try {
-    const script = `
-$hwnd = [IntPtr]${windowId}
-$sig = @"
-using System;
-using System.Runtime.InteropServices;
-public class FLSendInput {
-    [StructLayout(LayoutKind.Sequential)]
-    public struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
-    [StructLayout(LayoutKind.Sequential)]
-    public struct MOUSEINPUT { public int dx; public int dy; public uint mouseData; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
-    [StructLayout(LayoutKind.Sequential)]
-    public struct HARDWAREINPUT { public uint uMsg; public ushort wParamL; public ushort wParamH; }
-    [StructLayout(LayoutKind.Explicit)]
-    public struct InputUnion {
-        [FieldOffset(0)] public MOUSEINPUT mi;
-        [FieldOffset(0)] public KEYBDINPUT ki;
-        [FieldOffset(0)] public HARDWAREINPUT hi;
+    const result = await sendToPsHelper(windowId);
+    if (result === "OK") {
+      console.log(`[enforce] closed tab for ${targetName} (hwnd=${windowId})`);
+    } else if (result === "SKIP") {
+      console.log(`[enforce] skipped close for ${targetName}: not foreground anymore (hwnd=${windowId})`);
+    } else {
+      console.error(`[enforce] close-window helper returned unexpected result "${result}" for ${targetName}`);
     }
-    [StructLayout(LayoutKind.Sequential)]
-    public struct INPUT { public uint type; public InputUnion u; }
-    [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
-    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-    public const uint INPUT_KEYBOARD = 1;
-    public const uint KEYEVENTF_KEYUP = 0x0002;
-    public const ushort VK_CONTROL = 0x11;
-    public const ushort VK_W = 0x57;
-    public static uint CtrlW(IntPtr hWnd) {
-        SetForegroundWindow(hWnd);
-        System.Threading.Thread.Sleep(20);
-        INPUT[] inputs = new INPUT[4];
-        for (int i = 0; i < 4; i++) inputs[i].type = INPUT_KEYBOARD;
-        inputs[0].u.ki.wVk = VK_CONTROL;
-        inputs[1].u.ki.wVk = VK_W;
-        inputs[2].u.ki.wVk = VK_W;       inputs[2].u.ki.dwFlags = KEYEVENTF_KEYUP;
-        inputs[3].u.ki.wVk = VK_CONTROL; inputs[3].u.ki.dwFlags = KEYEVENTF_KEYUP;
-        return SendInput(4, inputs, Marshal.SizeOf(typeof(INPUT)));
-    }
-}
-"@
-if (-not ([System.Management.Automation.PSTypeName]'FLSendInput').Type) {
-    Add-Type -TypeDefinition $sig
-}
-[FLSendInput]::CtrlW($hwnd) | Out-Null
-`;
-    await execFileAsync(
-      "powershell",
-      ["-NoProfile", "-WindowStyle", "Hidden", "-Command", script],
-      { windowsHide: true }
-    );
-    console.log(`[enforce] closed tab for ${targetName} (hwnd=${windowId})`);
   } catch (error) {
     console.error(`[enforce] closeWindow failed for ${targetName}: ${String(error)}`);
+    // Force a respawn next time in case the helper process is wedged.
+    if (psHelper) {
+      try { psHelper.proc.kill(); } catch { /* best effort */ }
+      psHelper = null;
+    }
   }
-}
-
-function isInScheduledBlockWindow() {
-  const windows = state.policy?.blockWindows;
-  if (!Array.isArray(windows) || windows.length === 0) return false;
-  const now = new Date();
-  const day = now.getDay(); // 0=Sun
-  const currentMin = now.getHours() * 60 + now.getMinutes();
-  return windows.some((w) => {
-    if (Array.isArray(w.days) && !w.days.includes(day)) return false;
-    const [sh, sm] = (w.start || "00:00").split(":").map(Number);
-    const [eh, em] = (w.end   || "23:59").split(":").map(Number);
-    return currentMin >= sh * 60 + sm && currentMin < eh * 60 + em;
-  });
 }
 
 async function recordStreakOutcome(dateStr, underLimit) {
@@ -312,17 +352,72 @@ async function recordStreakOutcome(dateStr, underLimit) {
     const streakRef = doc(db, "users", USER_ID, "streak", "current");
     await runTransaction(db, async (tx) => {
       const snap = await tx.get(streakRef);
-      const prev = snap.exists() ? snap.data() : { currentStreak: 0, longestStreak: 0 };
-      const newStreak = underLimit ? prev.currentStreak + 1 : 0;
+      const prev = snap.exists()
+        ? snap.data()
+        : { currentStreak: 0, longestStreak: 0, lastRecordedDate: null };
+      // Idempotency guard: the 60s interval and a powerMonitor resume/unlock
+      // event can both call this for the same day (e.g. app was already
+      // running when the PC unlocked) — don't double-count the streak.
+      if (prev.lastRecordedDate && prev.lastRecordedDate >= dateStr) return;
+      const newStreak = underLimit ? (prev.currentStreak || 0) + 1 : 0;
       tx.set(streakRef, {
         currentStreak: newStreak,
         longestStreak: Math.max(newStreak, prev.longestStreak || 0),
-        lastSuccessDate: dateStr
+        lastSuccessDate: dateStr,
+        lastRecordedDate: dateStr
       });
     });
     console.log(`[streak] day ${dateStr} ${underLimit ? "kept" : "broken"} — streak update written`);
   } catch (e) {
     console.error(`[streak] failed to record day outcome: ${String(e)}`);
+  }
+}
+
+async function computeDayOutcome(dateStr) {
+  try {
+    const snap = await getDoc(doc(db, "users", USER_ID, "usage_days", dateStr));
+    const usage = snap.exists() ? snap.data() : { usedMinutes: 0, extensionsUsedToday: 0 };
+    return isUnderLimit(state.policy, usage);
+  } catch (e) {
+    console.error(`[streak] failed to read usage for ${dateStr}: ${String(e)}`);
+    return true; // fail open — a transient read error shouldn't break the streak
+  }
+}
+
+const MAX_BACKFILL_DAYS = 30;
+
+// Records streak outcomes for every fully-elapsed day since the last recorded
+// one. Called from the 60s in-process interval (normal case) and from
+// main.js on powerMonitor 'resume'/'unlock-screen' (PC was asleep/off across
+// local midnight, so the interval never fired).
+export async function checkDayRollover() {
+  try {
+    const streakRef = doc(db, "users", USER_ID, "streak", "current");
+    const snap = await getDoc(streakRef);
+    const today = getTodayString();
+
+    if (!snap.exists() || !snap.data().lastRecordedDate) {
+      // First run ever (or a pre-migration doc) — establish a baseline
+      // pointer at yesterday. We don't guess at outcomes for days before we
+      // started tracking.
+      const prev = snap.exists() ? snap.data() : { currentStreak: 0, longestStreak: 0 };
+      await setDoc(streakRef, { ...prev, lastRecordedDate: addDays(today, -1) }, { merge: true });
+      return;
+    }
+
+    const lastRecordedDate = snap.data().lastRecordedDate;
+    if (lastRecordedDate >= today) return; // already up to date
+
+    let cursor = addDays(lastRecordedDate, 1);
+    let processed = 0;
+    while (cursor < today && processed < MAX_BACKFILL_DAYS) {
+      const underLimit = await computeDayOutcome(cursor);
+      await recordStreakOutcome(cursor, underLimit);
+      cursor = addDays(cursor, 1);
+      processed++;
+    }
+  } catch (e) {
+    console.error(`[streak] rollover check failed: ${String(e)}`);
   }
 }
 
@@ -342,17 +437,12 @@ async function evaluateAndEnforce(target, windowId = null, isApp = false) {
 
   if (!state.policy) return;
 
-  if (isFocusSessionActive() || isInScheduledBlockWindow()) {
+  if (isFocusSessionActive() || isInScheduledBlockWindow(state.policy.blockWindows)) {
     state.blockedMode = true;
     state.blockedTarget = target;
     state.blockedTargetIsApp = isApp;
   } else {
-    const effectiveLimit =
-      (state.policy.dailyLimitMinutes ?? 0) +
-      (state.usage.extensionsUsedToday ?? 0) * (state.policy.extensionMinutes ?? 15);
-
-    // effectiveLimit of 0 means no limit configured — allow
-    const allowNow = effectiveLimit === 0 || (state.usage.usedMinutes ?? 0) < effectiveLimit;
+    const allowNow = isUnderLimit(state.policy, state.usage);
 
     if (allowNow) {
       state.blockedMode = false;
@@ -385,7 +475,7 @@ async function enforceBlockedMode(activeProcessName, activeWindowId, activeWindo
   if (!state.blockedMode || !state.blockedTarget) return;
 
   // Clear block state when nothing is actively blocking (session expired, outside window, under limit)
-  if (!isFocusSessionActive() && !isInScheduledBlockWindow() && !state.policy?.hardBlockAfterLimit) {
+  if (!isFocusSessionActive() && !isInScheduledBlockWindow(state.policy?.blockWindows) && !state.policy?.hardBlockAfterLimit) {
     state.blockedMode = false;
     state.blockedTarget = null;
     state.blockedTargetIsApp = false;
@@ -408,17 +498,6 @@ async function enforceBlockedMode(activeProcessName, activeWindowId, activeWindo
 // ── URL / domain matching ─────────────────────────────────────────────────────
 
 const BROWSER_PROCESSES = new Set(["chrome", "msedge", "firefox", "brave", "opera"]);
-
-function parseUrlHelper(urlStr) {
-  let tmp = urlStr.trim();
-  if (!/^https?:\/\//i.test(tmp)) tmp = "https://" + tmp;
-  try {
-    const parsed = new URL(tmp);
-    return { hostname: parsed.hostname.toLowerCase(), pathname: parsed.pathname.toLowerCase() };
-  } catch {
-    return null;
-  }
-}
 
 let lastWindowId = null;
 let lastWindowTitle = null;
@@ -444,42 +523,7 @@ async function getMatchingTargetDomain(title, processName, windowId) {
   const url = await getBrowserUrlWithCache(windowId, title);
   const parsed = url ? parseUrlHelper(url) : null;
 
-  for (const domain of state.policy.targetDomains) {
-    const domainLower = domain.toLowerCase().replace(/^https?:\/\//, "");
-    const slashIdx = domainLower.indexOf("/");
-    const hasPath = slashIdx !== -1;
-    const domainHost = hasPath ? domainLower.slice(0, slashIdx) : domainLower;
-    const pathPart = hasPath ? domainLower.slice(slashIdx) : "";
-
-    if (parsed) {
-      const hostMatch =
-        parsed.hostname === domainHost || parsed.hostname.endsWith("." + domainHost);
-      if (!hostMatch) continue;
-      if (hasPath) {
-        const cleanPath = pathPart.replace(/^\//, "");
-        if (parsed.pathname.includes(pathPart) || (cleanPath && titleLower.includes(cleanPath))) {
-          return domain;
-        }
-      } else {
-        return domain;
-      }
-    } else {
-      // Fallback: title-based heuristic when PS script fails
-      let baseWord = domainHost;
-      for (const tld of [".com", ".org", ".net", ".io", ".co"]) {
-        if (baseWord.endsWith(tld)) { baseWord = baseWord.slice(0, -tld.length); break; }
-      }
-      if (!baseWord || !titleLower.includes(baseWord)) continue;
-      if (hasPath) {
-        const cleanPath = pathPart.replace(/^\//, "");
-        if (cleanPath && titleLower.includes(cleanPath)) return domain;
-      } else {
-        return domain;
-      }
-    }
-  }
-
-  return null;
+  return matchTargetDomain(parsed, titleLower, state.policy.targetDomains);
 }
 
 // ── Monitor loop ──────────────────────────────────────────────────────────────
@@ -522,16 +566,31 @@ async function monitorLoop() {
   }
 }
 
+const BACKGROUND_SWEEP_INTERVAL_MS = 30_000;
+let backgroundSweepTimer = null;
+
 export function startAgent() {
   if (state.running) return;
   state.running = true;
   console.log("[agent] FocusLock Windows Agent starting…");
   setupFirebaseListeners();
+  checkDayRollover().catch((e) => console.error(`[streak] initial rollover check failed: ${String(e)}`));
   monitorLoop();
+  backgroundSweepTimer = setInterval(() => {
+    sweepBackgroundTargets().catch((e) => console.error(`[enforce] background sweep error: ${String(e)}`));
+  }, BACKGROUND_SWEEP_INTERVAL_MS);
 }
 
 export function stopAgent() {
   state.running = false;
+  if (backgroundSweepTimer) {
+    clearInterval(backgroundSweepTimer);
+    backgroundSweepTimer = null;
+  }
+  if (psHelper) {
+    try { psHelper.proc.kill(); } catch { /* best effort */ }
+    psHelper = null;
+  }
   console.log("[agent] FocusLock Windows Agent stopped.");
 }
 

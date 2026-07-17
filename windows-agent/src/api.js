@@ -1,5 +1,5 @@
 import {
-  db, doc, getDoc, setDoc, updateDoc, runTransaction,
+  db, doc, getDoc, setDoc, updateDoc,
   collection, addDoc, getDocs, query, orderBy, limit, deleteDoc,
   USER_ID
 } from "./firebase.js";
@@ -98,20 +98,6 @@ export async function getStreak() {
   return snap.exists()
     ? snap.data()
     : { currentStreak: 0, longestStreak: 0, lastSuccessDate: "" };
-}
-
-export async function recordDayOutcome(dateStr, underLimit) {
-  const streakRef = doc(db, "users", USER_ID, "streak", "current");
-  await runTransaction(db, async (tx) => {
-    const snap = await tx.get(streakRef);
-    const prev = snap.exists() ? snap.data() : { currentStreak: 0, longestStreak: 0 };
-    const newStreak = underLimit ? prev.currentStreak + 1 : 0;
-    tx.set(streakRef, {
-      currentStreak: newStreak,
-      longestStreak: Math.max(newStreak, prev.longestStreak || 0),
-      lastSuccessDate: dateStr
-    });
-  });
 }
 
 // --- WEEKLY USAGE ---

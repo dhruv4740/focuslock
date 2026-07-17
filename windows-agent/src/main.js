@@ -3,11 +3,12 @@
 // `import { app, BrowserWindow } from 'electron'` throws "does not provide an
 // export named …". Default-import the module object and destructure instead.
 import electron from 'electron';
-const { app, BrowserWindow, ipcMain, Tray, Menu } = electron;
+const { app, BrowserWindow, ipcMain, Tray, Menu, powerMonitor } = electron;
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { readFileSync, writeFileSync } from 'fs';
-import { startAgent, stopAgent, getAgentState } from './agent.js';
+import { startAgent, stopAgent, getAgentState, checkDayRollover } from './agent.js';
+import { registerWatchdog, unregisterWatchdog } from './watchdog.js';
 import { SETTINGS_PATH, sanitizeSyncId, USER_ID } from './firebase.js';
 import * as api from './api.js';
 // electron-updater is CommonJS; default-import and destructure under our ESM entry.
@@ -34,11 +35,16 @@ function createMainWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
-      sandbox: false
+      sandbox: true
     }
   });
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
+
+  // Renderer only ever shows the local dashboard; deny any attempt to open a
+  // new window or navigate away from it (defense-in-depth, not expected in practice).
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -65,6 +71,16 @@ function createTray() {
     { label: 'Open Dashboard', click: () => createMainWindow() },
     { type: 'separator' },
     { label: 'Quit', click: () => {
+      // Leaves the watchdog task in place — restarting within a minute is the
+      // intended deterrent against an impulsive quit. Use the item below to
+      // actually stop for good.
+      app.isQuitting = true;
+      app.quit();
+    }},
+    { label: 'Quit and disable watchdog', click: async () => {
+      if (app.isPackaged) {
+        await unregisterWatchdog();
+      }
       app.isQuitting = true;
       app.quit();
     }}
@@ -102,7 +118,19 @@ app.whenReady().then(() => {
   if (!gotSingleInstanceLock) return; // second instance: hand off and exit, don't start the agent
   startAgent();
   createTray();
-  createMainWindow();
+
+  // A packaged build self-registers for login launch (no separate scheduled-task
+  // step needed for end users). Login launches pass --hidden so the dashboard
+  // window doesn't pop up on every boot — the tray icon is enough.
+  if (app.isPackaged) {
+    app.setLoginItemSettings({ openAtLogin: true, args: ['--hidden'] });
+    registerWatchdog(process.execPath).catch((error) => {
+      console.error(`[watchdog] setup failed: ${String(error)}`);
+    });
+  }
+  if (!process.argv.includes('--hidden')) {
+    createMainWindow();
+  }
 
   // Self-update from GitHub Releases. The update feed (app-update.yml) only
   // exists in a packaged build, so skip this when running from source.
@@ -124,6 +152,12 @@ app.whenReady().then(() => {
         : `FocusLock — ${used} min used today`
     );
   }, 30_000);
+
+  // The 60s in-agent rollover check only fires while the process is running,
+  // so a PC asleep across local midnight would miss the day. Catch up whenever
+  // the machine wakes or unlocks.
+  powerMonitor.on('resume', () => checkDayRollover());
+  powerMonitor.on('unlock-screen', () => checkDayRollover());
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

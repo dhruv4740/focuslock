@@ -10,6 +10,7 @@
     "start": "electron .",
     "agent:cli": "node src/agent.js",
     "check": "node --check src/agent.js",
+    "test": "node --test \"test/**/*.test.js\"",
     "dist": "electron-builder --win nsis",
     "install-startup": "powershell -ExecutionPolicy Bypass -File ./scripts/install-startup-task.ps1",
     "remove-startup": "powershell -ExecutionPolicy Bypass -File ./scripts/remove-startup-task.ps1",
@@ -39,7 +40,8 @@
     "nsis": {
       "oneClick": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": false
+      "allowToChangeInstallationDirectory": false,
+      "include": "build/uninstaller.nsh"
     },
     "publish": [
       {

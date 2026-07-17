@@ -3,28 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <title>FocusLock Desktop Dashboard</title>
+  <!-- style-src allows 'unsafe-inline' because several elements use inline style="" attributes;
+       script-src stays locked to 'self' with no unsafe-inline/unsafe-eval, which is what
+       actually matters for XSS — CSS-only injection can't execute script. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:;">
   <link rel="stylesheet" href="index.css">
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
   <script defer src="renderer.js"></script>
-  <style>
-    .duration-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 8px; }
-    .chip { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border, #333); background: transparent; color: var(--text-main, #eee); cursor: pointer; font-size: 0.85rem; }
-    .chip.active { background: var(--accent, #6c63ff); border-color: var(--accent, #6c63ff); color: #fff; }
-    .chip-input { width: 80px; padding: 6px 10px; border-radius: 20px; border: 1px solid var(--border, #333); background: transparent; color: var(--text-main, #eee); font-size: 0.85rem; text-align: center; }
-    .streak-display { display: flex; align-items: baseline; gap: 8px; margin: 12px 0 4px; }
-    .streak-num { font-size: 2.8rem; font-weight: 700; color: var(--accent, #6c63ff); }
-    .streak-label { font-size: 1rem; color: var(--text-muted, #aaa); }
-    .streak-meta { font-size: 0.85rem; color: var(--text-muted, #aaa); }
-    .settings-grid { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
-    .settings-row { display: flex; flex-direction: column; gap: 6px; }
-    .settings-row label { font-size: 0.85rem; color: var(--text-muted, #aaa); }
-    .settings-row input[type="number"] { max-width: 160px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border, #333); background: var(--surface, #1e1e2e); color: var(--text-main, #eee); font-size: 0.9rem; }
-    .save-msg { margin-left: 12px; color: #2ecc71; font-size: 0.85rem; }
-    .day-chip { display: flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--text-muted, #aaa); cursor: pointer; }
-  </style>
 </head>
 <body>
   <!-- Custom Sleek Titlebar -->

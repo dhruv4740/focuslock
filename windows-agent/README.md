@@ -9,8 +9,15 @@ account with the Android app via a **sync code** (see the repo root README).
 - Watches the active foreground window (`active-win`) and matches it against the
   policy's `targetApps` (process names) and `targetDomains` (browser URLs).
 - Enforces the daily limit, focus sessions, and scheduled block windows: for a
-  blocked target it **closes the browser tab** (Ctrl+W via PostMessage) or
-  **terminates the app** (`taskkill`).
+  blocked target it **closes the browser tab** (Ctrl+W via SendInput, through a
+  persistent PowerShell helper process — see `scripts/close-window-helper.ps1`)
+  or **terminates the app** (`taskkill`). A background sweep (every 30s, while
+  blocking is active) also kills blocked apps running behind other windows —
+  browser tabs can't be swept this way and are still only enforced when
+  brought to the foreground.
+- In a packaged build, a per-user Scheduled Task (`src/watchdog.js`) relaunches
+  the app within a minute if it's killed via Task Manager. Tray → "Quit and
+  disable watchdog" removes the task for a real, permanent stop.
 - Receives policy / usage / focus-session changes through Firestore realtime
   listeners and records daily streak outcomes at local midnight.
 - Provides a tray app + dashboard (Settings, rules, todos, focus sessions,
@@ -25,6 +32,10 @@ account with the Android app via a **sync code** (see the repo root README).
 
 ## Startup on login
 
+Packaged builds (the NSIS installer) self-register for login launch via
+`app.setLoginItemSettings()` — no extra step needed.
+
+Running from source instead, use the scheduled-task scripts:
 - Install: `npm run install-startup`
 - Remove: `npm run remove-startup`
 
