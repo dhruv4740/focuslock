@@ -78,7 +78,7 @@ enum class SurfaceDecision { ALLOW, PRESS_BACK, GRANT_ENTRY }
  */
 class SurfaceSessionTracker(
     private val backDebounceMs: Long = 1500L,
-    private val postBackCooldownMs: Long = 3000L,
+    private val postBackCooldownMs: Long = 1500L,
     private val advanceDeltaPx: Int = 900
 ) {
     private sealed class State {
@@ -88,7 +88,11 @@ class SurfaceSessionTracker(
             var entryIndex: Int?,
             var accumulatedDeltaY: Int
         ) : State()
-        data class Cooldown(val untilMs: Long) : State()
+        // viewerWentAway flips once the viewer actually leaves the screen during
+        // cooldown; a later sighting is then a genuine re-entry (user navigated
+        // back in), not the Back-press animation still settling — and must be
+        // handled fresh instead of granting free untracked viewing time.
+        data class Cooldown(val untilMs: Long, var viewerWentAway: Boolean = false) : State()
     }
 
     private var state: State = State.Idle
@@ -104,10 +108,14 @@ class SurfaceSessionTracker(
         return SurfaceDecision.PRESS_BACK
     }
 
-    /** True while a just-issued Back press is still settling; callers should not re-arm. */
+    /**
+     * True while a just-issued Back press is still settling; callers should not re-arm.
+     * Only called from viewer-visible/scroll paths, so if the viewer already went away
+     * during this cooldown, its reappearance means the user re-entered — cooldown ends.
+     */
     private fun stillInCooldown(nowMs: Long): Boolean {
         val cooldown = state as? State.Cooldown ?: return false
-        if (nowMs < cooldown.untilMs) return true
+        if (nowMs < cooldown.untilMs && !cooldown.viewerWentAway) return true
         state = State.Idle
         return false
     }
@@ -187,7 +195,13 @@ class SurfaceSessionTracker(
     }
 
     fun onViewerGone(nowMs: Long) {
-        if (stillInCooldown(nowMs)) return
+        val cooldown = state as? State.Cooldown
+        if (cooldown != null && nowMs < cooldown.untilMs) {
+            // The Back press landed. Remember it so a quick re-entry inside the
+            // remaining cooldown is treated as a fresh session, not free time.
+            cooldown.viewerWentAway = true
+            return
+        }
         state = State.Idle
     }
 

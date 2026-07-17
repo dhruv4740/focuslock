@@ -124,6 +124,43 @@ class SurfaceDetectorTest {
     }
 
     @Test
+    fun `re-entry during cooldown after a real exit re-blocks instead of allowing`() {
+        val t = tracker(backDebounceMs = 1500L, postBackCooldownMs = 3000L)
+        assertEquals(SurfaceDecision.PRESS_BACK, t.onViewerVisible(reels, SurfaceMode.BLOCK, 0L))
+        // Back landed — the viewer actually left the screen.
+        t.onViewerGone(600L)
+        // User re-opens reels while the old cooldown window is still running:
+        // must be treated as a fresh sighting and blocked (debounce permitting),
+        // not silently allowed until the cooldown expires.
+        assertEquals(SurfaceDecision.PRESS_BACK, t.onViewerVisible(reels, SurfaceMode.BLOCK, 1600L))
+    }
+
+    @Test
+    fun `quick re-entry during cooldown is a fresh counted grant, not free time`() {
+        val t = tracker(backDebounceMs = 1500L, postBackCooldownMs = 3000L)
+        assertEquals(SurfaceDecision.GRANT_ENTRY, t.onViewerVisible(reels, SurfaceMode.ONE_AT_A_TIME, 0L))
+        t.onPagerScrolled(reels, SurfaceMode.ONE_AT_A_TIME, fromIndex = -1, toIndex = 0, scrollDeltaY = 0, nowMs = 10L)
+        // Swipe to the next reel — Back pressed, cooldown starts.
+        assertEquals(
+            SurfaceDecision.PRESS_BACK,
+            t.onPagerScrolled(reels, SurfaceMode.ONE_AT_A_TIME, fromIndex = 0, toIndex = 1, scrollDeltaY = 0, nowMs = 100L)
+        )
+        t.onViewerGone(700L)
+        // Re-entering 1s later (inside the old 3s cooldown) starts a NEW grant that
+        // gets counted against the daily limit — not an untracked ALLOW window.
+        assertEquals(SurfaceDecision.GRANT_ENTRY, t.onViewerVisible(reels, SurfaceMode.ONE_AT_A_TIME, 1100L))
+    }
+
+    @Test
+    fun `viewer lingering through cooldown without exiting stays suppressed`() {
+        val t = tracker(backDebounceMs = 1500L, postBackCooldownMs = 3000L)
+        assertEquals(SurfaceDecision.PRESS_BACK, t.onViewerVisible(reels, SurfaceMode.BLOCK, 0L))
+        // No onViewerGone — the Back press is still animating. Sightings must not re-arm.
+        assertEquals(SurfaceDecision.ALLOW, t.onViewerVisible(reels, SurfaceMode.BLOCK, 400L))
+        assertEquals(SurfaceDecision.ALLOW, t.onViewerVisible(reels, SurfaceMode.BLOCK, 900L))
+    }
+
+    @Test
     fun `exiting the viewer re-grants one reel on re-entry`() {
         val t = tracker()
         t.onViewerVisible(reels, SurfaceMode.ONE_AT_A_TIME, 0L)
