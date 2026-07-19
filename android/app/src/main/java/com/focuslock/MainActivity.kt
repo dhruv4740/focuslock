@@ -23,9 +23,12 @@ import android.content.ComponentName
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
+import com.focuslock.data.AppMode
 import com.focuslock.data.FocusPolicyClient
 import com.focuslock.data.FocusPolicyClient.PolicyData
+import com.focuslock.data.PresetMapper
 import com.focuslock.update.UpdateChecker
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.focuslock.receiver.PolicyDeviceAdminReceiver
 import com.focuslock.security.EnforcementChecks
 import com.focuslock.service.UsageMonitorService
@@ -75,6 +78,11 @@ class MainActivity : AppCompatActivity() {
     private fun spinnerIndexOf(wire: String?): Int =
         surfaceModeOptions.indexOfFirst { it.first == wire }.coerceAtLeast(0)
 
+    // Per-app mode choices shown in each target-app row. OFF isn't offered —
+    // removing the app (✕) is how you stop managing it, which keeps the
+    // targetApps == non-off-modes invariant trivially true.
+    private val appModeChoices = listOf(AppMode.FRICTION_ONLY, AppMode.LIMIT, AppMode.HARD_BLOCK)
+
     // Weekly chart
     private lateinit var layoutWeeklyChart: LinearLayout
 
@@ -117,10 +125,12 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         FocusPolicyClient.init(this)
 
+        setupBottomNav()
         setupSyncCode()
         setupTodoSection()
         setupFocusSession()
         setupPolicyEditor()
+        setupPresets()
         setupFrictionSettingsAndHelpCard(prefs)
 
         setupCollapsible(
@@ -211,6 +221,115 @@ class MainActivity : AppCompatActivity() {
         }
 
         UpdateChecker.checkForUpdate(this)
+    }
+
+    // ── Bottom navigation ─────────────────────────────────────────────────────
+
+    private fun setupBottomNav() {
+        val screens = mapOf(
+            R.id.navHome to findViewById<View>(R.id.screenHome),
+            R.id.navRules to findViewById<View>(R.id.screenRules),
+            R.id.navSettings to findViewById<View>(R.id.screenSettings)
+        )
+        findViewById<BottomNavigationView>(R.id.bottomNav).setOnItemSelectedListener { item ->
+            screens.forEach { (id, screen) ->
+                screen.visibility = if (id == item.itemId) View.VISIBLE else View.GONE
+            }
+            true
+        }
+    }
+
+    // ── Presets ───────────────────────────────────────────────────────────────
+
+    private fun setupPresets() {
+        mapOf(
+            R.id.btnPresetChill to PresetMapper.BUILTIN_CHILL,
+            R.id.btnPresetFocus to PresetMapper.BUILTIN_FOCUS,
+            R.id.btnPresetStrict to PresetMapper.BUILTIN_STRICT
+        ).forEach { (btnId, presetId) ->
+            findViewById<Button>(btnId).setOnClickListener { applyPreset(presetId) }
+        }
+    }
+
+    private fun applyPreset(presetId: String) {
+        val policy = currentPolicy
+        if (policy == null) {
+            Toast.makeText(this, "Policy still loading — try again in a moment", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (policy.targetApps.isEmpty()) {
+            Toast.makeText(this, "Add at least one app under Blocking Rules first", Toast.LENGTH_LONG).show()
+            return
+        }
+        // A saved preset with this id wins; otherwise generate the built-in
+        // template over the user's current target apps.
+        val bundle = policy.presets[presetId] ?: PresetMapper.builtInBundle(
+            presetId, policy.targetApps, policy.dailyLimitMinutes, policy.reelDailyLimit
+        ) ?: return
+        val name = PresetMapper.displayName(presetId, bundle)
+
+        AlertDialog.Builder(this)
+            .setTitle("Apply \"$name\" mode?")
+            .setMessage("This overwrites your per-app modes, daily limit behavior, reels settings and friction steps.")
+            .setPositiveButton("Apply") { _, _ ->
+                Thread {
+                    try {
+                        val fields = PresetMapper.bundleToLiveFields(presetId, bundle)
+                        FocusPolicyClient.updatePolicyFields(fields)
+
+                        // Friction steps + math difficulty live in local prefs.
+                        val steps = PresetMapper.frictionSteps(bundle)
+                        if (steps.isNotEmpty()) {
+                            val editor = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                            listOf(
+                                "enable_breathing", "enable_delay", "enable_intention",
+                                "enable_shake", "enable_reflection", "enable_stats", "enable_math"
+                            ).forEach { key -> editor.putBoolean(key, steps[key] as? Boolean ?: false) }
+                            (steps["math_difficulty"] as? String)?.let { editor.putString("math_difficulty", it) }
+                            editor.apply()
+                        }
+
+                        @Suppress("UNCHECKED_CAST")
+                        val surfaces = fields["blockedSurfaces"] as? Map<String, String>
+                        @Suppress("UNCHECKED_CAST")
+                        val reelLimits = fields["reelDailyLimit"] as? Map<String, Int> ?: emptyMap()
+                        if (surfaces != null) SurfaceBlocker.updateConfig(surfaces, reelLimits)
+
+                        startService(Intent(this, UsageMonitorService::class.java)
+                            .setAction(UsageMonitorService.ACTION_POLICY_UPDATED))
+
+                        runOnUiThread {
+                            Toast.makeText(this, "\"$name\" mode applied", Toast.LENGTH_SHORT).show()
+                            currentPolicy = null
+                            loadPolicyIntoEditor()
+                            syncFrictionSwitchStates()
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            Toast.makeText(this, "Failed to apply mode: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }.start()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // Re-read friction prefs into the switches after a preset changed them
+    // behind the UI's back. Listeners re-fire with identical values — harmless.
+    private fun syncFrictionSwitchStates() {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        mapOf(
+            R.id.switchBreathing to "enable_breathing",
+            R.id.switchDelay to "enable_delay",
+            R.id.switchIntention to "enable_intention",
+            R.id.switchShake to "enable_shake",
+            R.id.switchReflection to "enable_reflection",
+            R.id.switchStats to "enable_stats",
+            R.id.switchMath to "enable_math"
+        ).forEach { (id, key) ->
+            findViewById<SwitchCompat>(id).isChecked = prefs.getBoolean(key, true)
+        }
     }
 
     // ── Collapsible cards ─────────────────────────────────────────────────────
@@ -311,7 +430,10 @@ class MainActivity : AppCompatActivity() {
             if (pkg.isEmpty()) return@setOnClickListener
             val policy = currentPolicy ?: return@setOnClickListener
             if (!policy.targetApps.contains(pkg)) {
-                currentPolicy = policy.copy(targetApps = policy.targetApps + pkg)
+                currentPolicy = policy.copy(
+                    targetApps = policy.targetApps + pkg,
+                    appModes = policy.appModes + (pkg to AppMode.LIMIT.wire)
+                )
                 renderTargetApps()
             }
             editNewTargetApp.setText("")
@@ -362,11 +484,18 @@ class MainActivity : AppCompatActivity() {
         val extMins = editExtensionMins.text.toString().trim().toIntOrNull() ?: policy.extensionMinutes
         val extLimit = editExtensionLimit.text.toString().trim().toIntOrNull() ?: policy.dailyExtensionLimit
         val hardBlock = switchHardBlock.isChecked
+        // Every target gets a mode entry (default LIMIT); targetApps stays the
+        // derived set of non-off modes so the Windows agent keeps working.
+        val appModes = policy.targetApps
+            .associateWith { policy.appModes[it] ?: AppMode.LIMIT.wire }
+            .filterValues { it != AppMode.OFF.wire }
         currentPolicy = policy.copy(
             dailyLimitMinutes = dailyLimit,
             extensionMinutes = extMins,
             dailyExtensionLimit = extLimit,
-            hardBlockAfterLimit = hardBlock
+            hardBlockAfterLimit = hardBlock,
+            targetApps = appModes.keys.toList(),
+            appModes = appModes
         )
         saveFields(
             btn, confirmationView,
@@ -375,7 +504,8 @@ class MainActivity : AppCompatActivity() {
                 "extensionMinutes" to extMins,
                 "dailyExtensionLimit" to extLimit,
                 "hardBlockAfterLimit" to hardBlock,
-                "targetApps" to (currentPolicy?.targetApps ?: emptyList<String>()),
+                "targetApps" to appModes.keys.toList(),
+                "appModes" to appModes,
                 "blockWindows" to (currentPolicy?.blockWindows ?: emptyList<Map<String, Any>>())
             )
         )
@@ -447,6 +577,12 @@ class MainActivity : AppCompatActivity() {
                     val ytLimit = policy.reelDailyLimit["youtube_shorts"] ?: 0
                     editReelLimitInstagram.setText(if (igLimit > 0) igLimit.toString() else "")
                     editReelLimitYoutube.setText(if (ytLimit > 0) ytLimit.toString() else "")
+                    findViewById<TextView>(R.id.txtActivePreset).text =
+                        if (policy.activePresetId.isNotEmpty()) {
+                            "Active mode: ${PresetMapper.displayName(policy.activePresetId, policy.presets[policy.activePresetId])}"
+                        } else {
+                            "One tap applies a whole profile: per-app modes, limits, reels and friction."
+                        }
                 }
             } catch (e: Exception) {
                 // leave fields empty, user can fill in
@@ -499,12 +635,28 @@ class MainActivity : AppCompatActivity() {
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 )
                 setPadding(0, 4, 0, 4)
+                gravity = android.view.Gravity.CENTER_VERTICAL
             }
             val label = TextView(this).apply {
                 text = pkg
                 setTextColor(getColor(R.color.text_primary))
                 textSize = 13f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val modeSpinner = Spinner(this).apply {
+                adapter = ArrayAdapter(
+                    this@MainActivity, android.R.layout.simple_spinner_item, appModeChoices.map { it.label }
+                ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+                backgroundTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.text_primary))
+                val current = AppMode.fromWire(policy.appModes[pkg], inTargetApps = true)
+                setSelection(appModeChoices.indexOf(current).coerceAtLeast(0))
+                onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                        val mode = appModeChoices[position]
+                        currentPolicy = currentPolicy?.let { p -> p.copy(appModes = p.appModes + (pkg to mode.wire)) }
+                    }
+                    override fun onNothingSelected(parent: AdapterView<*>?) {}
+                }
             }
             val del = Button(this).apply {
                 text = "✕"
@@ -514,11 +666,17 @@ class MainActivity : AppCompatActivity() {
                 val size = (32 * resources.displayMetrics.density).toInt()
                 layoutParams = LinearLayout.LayoutParams(size, size).apply { marginStart = 8 }
                 setOnClickListener {
-                    currentPolicy = currentPolicy?.copy(targetApps = currentPolicy!!.targetApps.filter { it != pkg })
+                    currentPolicy = currentPolicy?.let { p ->
+                        p.copy(
+                            targetApps = p.targetApps.filter { it != pkg },
+                            appModes = p.appModes - pkg
+                        )
+                    }
                     renderTargetApps()
                 }
             }
             row.addView(label)
+            row.addView(modeSpinner)
             row.addView(del)
             layoutTargetApps.addView(row)
         }

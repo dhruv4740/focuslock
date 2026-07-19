@@ -1,9 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_dark"
-    android:scrollbars="none">
+    android:orientation="vertical"
+    android:background="@color/bg_dark">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+    <!-- Home screen: title, stats, todos, focus session -->
+    <ScrollView
+        android:id="@+id/screenHome"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -42,64 +55,6 @@
                 android:textSize="12sp"
                 android:layout_marginTop="6dp"
                 android:padding="4dp" />
-        </LinearLayout>
-
-        <!-- Sync Code Card -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/card_background"
-            android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="SYNC CODE"
-                android:textColor="@color/color_primary"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.1" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Use the same code on your phone and desktop to keep them in sync. A different person should pick their own code to keep their data separate."
-                android:textColor="@color/text_secondary"
-                android:textSize="13sp"
-                android:layout_marginTop="6dp" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginTop="12dp">
-
-                <EditText
-                    android:id="@+id/editSyncId"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:hint="e.g. dhruv-01"
-                    android:textColorHint="@color/text_secondary"
-                    android:inputType="textNoSuggestions"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
-                    android:padding="10dp"
-                    android:background="@drawable/edittext_background"
-                    android:maxLines="1" />
-
-                <Button
-                    android:id="@+id/btnSaveSyncId"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Save"
-                    android:textColor="@color/text_primary"
-                    android:background="@drawable/button_primary"
-                    android:layout_marginStart="8dp" />
-            </LinearLayout>
         </LinearLayout>
 
         <!-- Stats Card (today + weekly, merged) -->
@@ -160,102 +115,6 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:layout_marginTop="12dp" />
-        </LinearLayout>
-
-        <!-- Protection Status Card (+ Monitor Control, merged) -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/card_background"
-            android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="PROTECTION &amp; PERMISSIONS"
-                android:textColor="@color/color_primary"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.1" />
-
-            <TextView
-                android:id="@+id/txtStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Checking status..."
-                android:textColor="@color/text_primary"
-                android:textSize="14sp"
-                android:layout_marginTop="8dp"
-                android:lineSpacingExtra="4dp" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginTop="16dp"
-                android:weightSum="3">
-
-                <Button
-                    android:id="@+id/btnUsageAccess"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Usage"
-                    android:textSize="11sp"
-                    android:layout_marginEnd="4dp"
-                    android:background="@drawable/button_secondary"
-                    android:textColor="@color/text_primary" />
-
-                <Button
-                    android:id="@+id/btnAccessibility"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Access"
-                    android:textSize="11sp"
-                    android:layout_marginHorizontal="2dp"
-                    android:background="@drawable/button_secondary"
-                    android:textColor="@color/text_primary" />
-
-                <Button
-                    android:id="@+id/btnOverlay"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Overlay"
-                    android:textSize="11sp"
-                    android:layout_marginStart="4dp"
-                    android:background="@drawable/button_secondary"
-                    android:textColor="@color/text_primary" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginTop="10dp">
-
-                <Button
-                    android:id="@+id/btnStartMonitor"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Start Monitor"
-                    android:layout_marginEnd="6dp"
-                    android:background="@drawable/button_primary"
-                    android:textColor="@color/text_primary" />
-
-                <Button
-                    android:id="@+id/btnStopMonitor"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Stop Monitor"
-                    android:background="@drawable/button_secondary"
-                    android:textColor="@color/text_primary" />
-            </LinearLayout>
         </LinearLayout>
 
         <!-- Todo List Card -->
@@ -395,6 +254,92 @@
                     android:layout_weight="0.8"
                     android:text="Stop"
                     android:textSize="12sp"
+                    android:background="@drawable/button_secondary"
+                    android:textColor="@color/text_primary" />
+            </LinearLayout>
+        </LinearLayout>
+
+    </LinearLayout>
+    </ScrollView>
+
+    <!-- Rules screen: presets, reels, blocking rules -->
+    <ScrollView
+        android:id="@+id/screenRules"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none"
+        android:visibility="gone">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <!-- Presets Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="MODES"
+                android:textColor="@color/color_primary"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1" />
+
+            <TextView
+                android:id="@+id/txtActivePreset"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="One tap applies a whole profile: per-app modes, limits, reels and friction."
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp"
+                android:layout_marginTop="6dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="12dp"
+                android:weightSum="3">
+
+                <Button
+                    android:id="@+id/btnPresetChill"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Chill"
+                    android:textSize="12sp"
+                    android:layout_marginEnd="4dp"
+                    android:background="@drawable/button_secondary"
+                    android:textColor="@color/text_primary" />
+
+                <Button
+                    android:id="@+id/btnPresetFocus"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Focus"
+                    android:textSize="12sp"
+                    android:layout_marginHorizontal="2dp"
+                    android:background="@drawable/button_secondary"
+                    android:textColor="@color/text_primary" />
+
+                <Button
+                    android:id="@+id/btnPresetStrict"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Strict"
+                    android:textSize="12sp"
+                    android:layout_marginStart="4dp"
                     android:background="@drawable/button_secondary"
                     android:textColor="@color/text_primary" />
             </LinearLayout>
@@ -846,6 +791,119 @@
             </LinearLayout>
         </LinearLayout>
 
+    </LinearLayout>
+    </ScrollView>
+
+    <!-- Settings screen: protection, friction, sync code -->
+    <ScrollView
+        android:id="@+id/screenSettings"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none"
+        android:visibility="gone">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <!-- Protection Status Card (+ Monitor Control, merged) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="PROTECTION &amp; PERMISSIONS"
+                android:textColor="@color/color_primary"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1" />
+
+            <TextView
+                android:id="@+id/txtStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Checking status..."
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:layout_marginTop="8dp"
+                android:lineSpacingExtra="4dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="16dp"
+                android:weightSum="3">
+
+                <Button
+                    android:id="@+id/btnUsageAccess"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Usage"
+                    android:textSize="11sp"
+                    android:layout_marginEnd="4dp"
+                    android:background="@drawable/button_secondary"
+                    android:textColor="@color/text_primary" />
+
+                <Button
+                    android:id="@+id/btnAccessibility"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Access"
+                    android:textSize="11sp"
+                    android:layout_marginHorizontal="2dp"
+                    android:background="@drawable/button_secondary"
+                    android:textColor="@color/text_primary" />
+
+                <Button
+                    android:id="@+id/btnOverlay"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Overlay"
+                    android:textSize="11sp"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/button_secondary"
+                    android:textColor="@color/text_primary" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="10dp">
+
+                <Button
+                    android:id="@+id/btnStartMonitor"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Start Monitor"
+                    android:layout_marginEnd="6dp"
+                    android:background="@drawable/button_primary"
+                    android:textColor="@color/text_primary" />
+
+                <Button
+                    android:id="@+id/btnStopMonitor"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Stop Monitor"
+                    android:background="@drawable/button_secondary"
+                    android:textColor="@color/text_primary" />
+            </LinearLayout>
+        </LinearLayout>
+
         <!-- Friction & Blocker Settings Card (collapsible, collapsed by default) -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -1003,5 +1061,76 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- Sync Code Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="SYNC CODE"
+                android:textColor="@color/color_primary"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Use the same code on your phone and desktop to keep them in sync. A different person should pick their own code to keep their data separate."
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp"
+                android:layout_marginTop="6dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="12dp">
+
+                <EditText
+                    android:id="@+id/editSyncId"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:hint="e.g. dhruv-01"
+                    android:textColorHint="@color/text_secondary"
+                    android:inputType="textNoSuggestions"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:padding="10dp"
+                    android:background="@drawable/edittext_background"
+                    android:maxLines="1" />
+
+                <Button
+                    android:id="@+id/btnSaveSyncId"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Save"
+                    android:textColor="@color/text_primary"
+                    android:background="@drawable/button_primary"
+                    android:layout_marginStart="8dp" />
+            </LinearLayout>
+        </LinearLayout>
+
     </LinearLayout>
-</ScrollView>
+    </ScrollView>
+
+    </FrameLayout>
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNav"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/surface_dark"
+        app:itemIconTint="@color/text_primary"
+        app:itemTextColor="@color/text_primary"
+        app:labelVisibilityMode="labeled"
+        app:menu="@menu/bottom_nav_menu" />
+</LinearLayout>
