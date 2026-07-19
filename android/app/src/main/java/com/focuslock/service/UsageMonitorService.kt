@@ -26,6 +26,7 @@ class UsageMonitorService : Service() {
         private const val CHANNEL_ID_MONITOR_LEGACY = "focuslock-monitor"
         private const val CHANNEL_ID_ALERTS = "focuslock-alerts"
         private const val NOTIFICATION_ALERT_ID = 1102
+        private const val NOTIFICATION_OVERLAY_PERM_ID = 1103
         private const val OVERLAY_COOLDOWN_MS = 3000L
 
         const val ACTION_DISMISS_LOCK_OVERLAY = "com.focuslock.DISMISS_LOCK_OVERLAY"
@@ -61,7 +62,16 @@ class UsageMonitorService : Service() {
     private var hadSuccessfulEvaluate = false
 
     private var warningNotificationSentDate = ""
+    private var overlayPermAlertSentDate = ""
     private var lastPolicyRefreshAt = 0L
+
+    // Last non-transient foreground package seen, whether or not it was a target at
+    // the time. FocusAccessibilityService dedupes same-package forwards, so if the
+    // first forward for an app arrives before the async policy fetch has populated
+    // targetApps, no further forward comes for that app — replaying this after each
+    // policy refresh closes that race (and makes newly-added targets apply while
+    // the app is already open).
+    @Volatile private var lastSeenForegroundPackage: String? = null
     private val POLICY_REFRESH_THROTTLE_MS = 15 * 60 * 1000L
     private var localTimerRunnable: Runnable? = null
     private var isLockOverlayActive = false
@@ -78,6 +88,7 @@ class UsageMonitorService : Service() {
         super.onCreate()
         isServiceActive = true
         FocusPolicyClient.init(this)
+        SurfaceBlocker.init(this)
         createNotificationChannels()
 
         // One-time cold-start seed so the daily reel quota survives a process
@@ -164,6 +175,10 @@ class UsageMonitorService : Service() {
         pkg.contains("phone")
 
     private fun handleForegroundChanged(packageName: String) {
+        if (!isTransientSystemPackage(packageName)) {
+            lastSeenForegroundPackage = packageName
+        }
+
         // While our own friction/lock overlay is the active barrier, ignore any
         // foreground change that isn't a switch to a *different* target app.
         // When the user interacts with the overlay (e.g. tapping the reflection
@@ -265,6 +280,10 @@ class UsageMonitorService : Service() {
                         targetApps.clear()
                         targetApps.addAll(apps)
                         Log.d(TAG, "Policy refreshed: targetApps=$targetApps")
+                        // Replay the current foreground app: its forwards may have
+                        // been deduped away while targetApps was still empty.
+                        // Idempotent — a no-op if it's already the tracked target.
+                        lastSeenForegroundPackage?.let { handleForegroundChanged(it) }
                     }
                 }
                 val surfacesJson = policyJson.optJSONObject("blockedSurfaces")
@@ -417,9 +436,11 @@ class UsageMonitorService : Service() {
 
     private fun showLockOverlay(packageName: String) {
         if (!Settings.canDrawOverlays(this)) {
+            // getPackageName(): the parameter shadows the Context property — the
+            // permission page must open for FocusLock, not the target app.
             startActivity(Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
+                Uri.parse("package:${getPackageName()}")
             ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return
         }
@@ -465,7 +486,7 @@ class UsageMonitorService : Service() {
         if (!Settings.canDrawOverlays(this)) {
             startActivity(Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
+                Uri.parse("package:${getPackageName()}")
             ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return
         }
@@ -489,6 +510,10 @@ class UsageMonitorService : Service() {
     }
 
     private fun showTimerOverlay(packageName: String) {
+        if (!Settings.canDrawOverlays(this)) {
+            notifyOverlayPermissionMissing()
+            return
+        }
         try {
             val sessionStart = sessionStartByPackage[packageName] ?: System.currentTimeMillis()
             startService(Intent(this, TimerOverlayService::class.java)
@@ -497,6 +522,35 @@ class UsageMonitorService : Service() {
         } catch (e: Exception) {
             Log.w(TAG, "showTimerOverlay failed", e)
         }
+    }
+
+    // The timer badge (and the blockers) silently can't render without the overlay
+    // permission — surface that once per day instead of failing invisibly.
+    private fun notifyOverlayPermissionMissing() {
+        val today = LocalDate.now().toString()
+        if (overlayPermAlertSentDate == today) return
+        overlayPermAlertSentDate = today
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        }
+        val settingsIntent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:${getPackageName()}")
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val pendingIntent = android.app.PendingIntent.getActivity(
+            this, 0, settingsIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID_ALERTS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("FocusLock can't show its timer")
+            .setContentText("Grant \"Display over other apps\" to see the session timer and blockers.")
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+            .notify(NOTIFICATION_OVERLAY_PERM_ID, notification)
     }
 
     private fun dismissTimerOverlay() {
