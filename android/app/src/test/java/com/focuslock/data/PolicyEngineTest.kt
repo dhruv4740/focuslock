@@ -110,6 +110,50 @@ class PolicyEngineTest {
     }
 
     @Test
+    fun `friction_only mode never limit-blocks`() {
+        val p = policy(hardBlockAfterLimit = true).copy(
+            appModes = mapOf("com.instagram.android" to "friction_only")
+        )
+        val d = PolicyEngine.decide(p, PolicyEngine.UsageInputs(500.0, 0), now(), "com.instagram.android")
+        assertTrue(d.allowNow)
+        assertEquals("none", d.action)
+        assertEquals(0, d.effectiveLimit)
+    }
+
+    @Test
+    fun `hard_block mode locks at limit even with global soft setting`() {
+        val p = policy(hardBlockAfterLimit = false).copy(
+            appModes = mapOf("com.instagram.android" to "hard_block")
+        )
+        val d = PolicyEngine.decide(p, PolicyEngine.UsageInputs(60.0, 0), now(), "com.instagram.android")
+        assertFalse(d.allowNow)
+        assertEquals("hard-block", d.action)
+    }
+
+    @Test
+    fun `legacy app without appModes entry behaves as limit mode`() {
+        val d = PolicyEngine.decide(
+            policy(hardBlockAfterLimit = true),
+            PolicyEngine.UsageInputs(60.0, 0),
+            now(),
+            "com.some.app"
+        )
+        assertFalse(d.allowNow)
+        assertEquals("hard-block", d.action)
+    }
+
+    @Test
+    fun `friction_only still hard-blocks inside a block window`() {
+        val windows = listOf(PolicyEngine.BlockWindow(0, 24 * 60, (0..6).toSet()))
+        val p = policy(blockWindows = windows).copy(
+            appModes = mapOf("com.instagram.android" to "friction_only")
+        )
+        val d = PolicyEngine.decide(p, PolicyEngine.UsageInputs(0.0, 0), now(), "com.instagram.android")
+        assertFalse(d.allowNow)
+        assertEquals("scheduled-block-window", d.reason)
+    }
+
+    @Test
     fun `block window boundary is start-inclusive end-exclusive`() {
         val windows = listOf(PolicyEngine.BlockWindow(startMin = 600, endMin = 660, days = setOf(1)))
         val atStart = PolicyEngine.decide(policy(blockWindows = windows), PolicyEngine.UsageInputs(0.0, 0), now(minuteOfDay = 600))

@@ -38,7 +38,22 @@ object PolicyEngine {
         now: Now,
         packageName: String? = null
     ): FocusPolicyClient.Decision {
-        val effectiveLimit = policy.dailyLimitMinutes + usage.extensionsUsedToday * policy.extensionMinutes
+        // Per-app mode: entries absent from appModes behave as LIMIT (legacy docs,
+        // apps added from the Windows dashboard). No packageName = the aggregate/
+        // dashboard evaluation, which also uses LIMIT semantics.
+        val mode = packageName?.let { AppMode.fromWire(policy.appModes[it], inTargetApps = true) }
+            ?: AppMode.LIMIT
+
+        // HARD_BLOCK ignores the global soft/hard switch; FRICTION_ONLY has no
+        // limit at all — the daily limit only ever locks LIMIT-mode apps.
+        val hardBlockForApp = when (mode) {
+            AppMode.HARD_BLOCK -> true
+            else -> policy.hardBlockAfterLimit
+        }
+        val effectiveLimit = when (mode) {
+            AppMode.FRICTION_ONLY -> 0
+            else -> policy.dailyLimitMinutes + usage.extensionsUsedToday * policy.extensionMinutes
+        }
 
         val inBlockWindow = policy.blockWindows.any { w ->
             now.dayOfWeek in w.days && now.minuteOfDay in w.startMin until w.endMin
@@ -52,7 +67,7 @@ object PolicyEngine {
                 effectiveLimit = 0,
                 usedMinutes = usage.usedMinutes,
                 userUsedMinutes = usage.usedMinutes,
-                hardBlockAfterLimit = policy.hardBlockAfterLimit
+                hardBlockAfterLimit = hardBlockForApp
             )
         }
 
@@ -65,13 +80,13 @@ object PolicyEngine {
                 effectiveLimit = effectiveLimit,
                 usedMinutes = usage.usedMinutes,
                 userUsedMinutes = usage.usedMinutes,
-                hardBlockAfterLimit = policy.hardBlockAfterLimit
+                hardBlockAfterLimit = hardBlockForApp
             )
         }
 
         // Over the daily limit: hardBlockAfterLimit decides lock vs. friction —
         // matching the Windows agent, where OFF means "never hard-block on limit".
-        return if (policy.hardBlockAfterLimit) {
+        return if (hardBlockForApp) {
             FocusPolicyClient.Decision(
                 allowNow = false,
                 action = "hard-block",

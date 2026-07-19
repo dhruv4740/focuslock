@@ -53,8 +53,14 @@ class UsageMonitorService : Service() {
         @Volatile var lastBreakClickedAt = 0L
     }
 
-    // Dynamic target set — starts empty, populated from policy
+    // Dynamic target set — starts empty, populated from policy. An app is a
+    // target iff its resolved AppMode != OFF; appModes holds the resolved mode
+    // per target (legacy targetApps entries without an appModes entry = LIMIT).
     private val targetApps = mutableSetOf<String>()
+    private val appModes = mutableMapOf<String, com.focuslock.data.AppMode>()
+
+    private fun modeFor(packageName: String): com.focuslock.data.AppMode =
+        appModes[packageName] ?: com.focuslock.data.AppMode.OFF
 
     // Per-package tracking
     private val sessionStartByPackage = mutableMapOf<String, Long>()
@@ -244,9 +250,11 @@ class UsageMonitorService : Service() {
         } else {
             val now = System.currentTimeMillis()
             val lastBypass = lastFrictionBypassTimeByPackage[packageName] ?: 0L
-            // Past the soft limit the 5-min friction cooldown no longer applies —
-            // every open costs the full friction gate.
-            if (isOverLimitSoft || now - lastBypass > FRICTION_COOLDOWN_MS) {
+            // Past the soft limit the 5-min friction cooldown no longer applies to
+            // LIMIT-mode apps — every open costs the full friction gate. Other
+            // modes keep the normal cooldown (FRICTION_ONLY has no limit at all).
+            val softLimitFriction = isOverLimitSoft && modeFor(packageName) == com.focuslock.data.AppMode.LIMIT
+            if (softLimitFriction || now - lastBypass > FRICTION_COOLDOWN_MS) {
                 showFrictionOverlay(packageName)
             } else {
                 evaluateAndLockIfNeeded(packageName)
@@ -292,17 +300,27 @@ class UsageMonitorService : Service() {
             try {
                 val policyJson = FocusPolicyClient.fetchPolicy()
                 val appsArray = policyJson.optJSONArray("targetApps")
-                if (appsArray != null) {
-                    val apps = (0 until appsArray.length()).map { appsArray.getString(it) }.toSet()
-                    handler.post {
-                        targetApps.clear()
-                        targetApps.addAll(apps)
-                        Log.d(TAG, "Policy refreshed: targetApps=$targetApps")
-                        // Replay the current foreground app: its forwards may have
-                        // been deduped away while targetApps was still empty.
-                        // Idempotent — a no-op if it's already the tracked target.
-                        lastSeenForegroundPackage?.let { handleForegroundChanged(it) }
-                    }
+                val docTargets = if (appsArray != null) {
+                    (0 until appsArray.length()).map { appsArray.getString(it) }.toSet()
+                } else emptySet()
+                val modesJson = policyJson.optJSONObject("appModes")
+                val wireModes = modesJson?.keys()?.asSequence()
+                    ?.associateWith { modesJson.getString(it) } ?: emptyMap()
+                // Resolve a mode for every app mentioned anywhere; targets are the
+                // ones that resolve to something other than OFF.
+                val resolved = (docTargets + wireModes.keys).associateWith { pkg ->
+                    com.focuslock.data.AppMode.fromWire(wireModes[pkg], pkg in docTargets)
+                }
+                handler.post {
+                    appModes.clear()
+                    appModes.putAll(resolved)
+                    targetApps.clear()
+                    targetApps.addAll(resolved.filterValues { it != com.focuslock.data.AppMode.OFF }.keys)
+                    Log.d(TAG, "Policy refreshed: targetApps=$targetApps modes=$appModes")
+                    // Replay the current foreground app: its forwards may have
+                    // been deduped away while targetApps was still empty.
+                    // Idempotent — a no-op if it's already the tracked target.
+                    lastSeenForegroundPackage?.let { handleForegroundChanged(it) }
                 }
                 val surfacesJson = policyJson.optJSONObject("blockedSurfaces")
                 if (surfacesJson != null) {

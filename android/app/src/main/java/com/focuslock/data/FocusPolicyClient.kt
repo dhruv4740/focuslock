@@ -176,11 +176,14 @@ object FocusPolicyClient {
         val blockedSurfaces = data["blockedSurfaces"] as? Map<String, String> ?: emptyMap()
         @Suppress("UNCHECKED_CAST")
         val reelDailyLimit = data["reelDailyLimit"] as? Map<String, Number> ?: emptyMap()
+        @Suppress("UNCHECKED_CAST")
+        val appModes = data["appModes"] as? Map<String, String> ?: emptyMap()
         return JSONObject().apply {
             put("targetApps", JSONArray(data["targetApps"] as? List<String> ?: emptyList<String>()))
             put("targetDomains", JSONArray(data["targetDomains"] as? List<String> ?: emptyList<String>()))
             put("blockedSurfaces", JSONObject(blockedSurfaces))
             put("reelDailyLimit", JSONObject(reelDailyLimit.mapValues { it.value.toInt() }))
+            put("appModes", JSONObject(appModes))
         }
     }
 
@@ -414,7 +417,12 @@ object FocusPolicyClient {
         val targetDomains: List<String>,
         val blockWindows: List<Map<String, Any>>,
         val blockedSurfaces: Map<String, String> = emptyMap(),
-        val reelDailyLimit: Map<String, Int> = emptyMap()
+        val reelDailyLimit: Map<String, Int> = emptyMap(),
+        // Additive fields (old docs parse fine with the defaults; the Windows
+        // dashboard round-trips them untouched).
+        val appModes: Map<String, String> = emptyMap(),
+        val presets: Map<String, Map<String, Any>> = emptyMap(),
+        val activePresetId: String = ""
     )
 
     fun getPolicy(): PolicyData {
@@ -440,7 +448,10 @@ object FocusPolicyClient {
             },
             blockedSurfaces = (data["blockedSurfaces"] as? Map<String, String>) ?: emptyMap(),
             reelDailyLimit = ((data["reelDailyLimit"] as? Map<String, Number>) ?: emptyMap())
-                .mapValues { it.value.toInt() }
+                .mapValues { it.value.toInt() },
+            appModes = (data["appModes"] as? Map<String, String>) ?: emptyMap(),
+            presets = (data["presets"] as? Map<String, Map<String, Any>>) ?: emptyMap(),
+            activePresetId = data["activePresetId"] as? String ?: ""
         )
     }
 
