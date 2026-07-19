@@ -462,6 +462,12 @@ class UsageMonitorService : Service() {
         val durationMinutes = (endMs - startMs) / 60_000.0
         if (durationMinutes <= 0.0) return
 
+        // Local-first: the badge's "Nm today" reads this store, so it must be
+        // written even when the network post below fails or the process dies.
+        com.focuslock.data.AppUsageStore.addSession(
+            this, LocalDate.now().toString(), packageName, durationMinutes
+        )
+
         networkExecutor.submit {
             try {
                 val startedAt = java.time.Instant.ofEpochMilli(startMs)

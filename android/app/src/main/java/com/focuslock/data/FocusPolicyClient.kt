@@ -333,6 +333,16 @@ object FocusPolicyClient {
             null
         })
 
+        // Additive per-app aggregate (dashboards read this in one shot instead of
+        // scanning events). Merge write — the Windows agent round-trips unknown
+        // fields untouched.
+        Tasks.await(
+            usageRef.set(
+                mapOf("perApp" to mapOf(target to FieldValue.increment(durationMinutes))),
+                SetOptions.merge()
+            )
+        )
+
         val eventData = mapOf(
             "type" to "usage",
             "target" to target,

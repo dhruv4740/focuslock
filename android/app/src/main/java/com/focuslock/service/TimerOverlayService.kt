@@ -183,15 +183,28 @@ class TimerOverlayService : Service() {
         val seconds = totalSeconds % 60
 
         val timeText = "$minutes:${String.format("%02d", seconds)}"
-        timerView?.text = currentTarget?.let { BlockableSurface.byPackage(it) }
+
+        // Persistent daily total for this app: finalized sessions from the local
+        // store plus the live (not yet finalized) session. Survives restarts,
+        // unlike the per-session stopwatch.
+        val dailyText = currentTarget?.let { target ->
+            val stored = com.focuslock.data.AppUsageStore.minutesToday(
+                this, java.time.LocalDate.now().toString(), target
+            )
+            val totalToday = (stored + elapsedMs / 60_000.0).toInt()
+            "${totalToday}m today"
+        }
+
+        val reelText = currentTarget?.let { BlockableSurface.byPackage(it) }
             ?.let { SurfaceBlocker.statusFor(it) }
             ?.takeIf { it.enabled }
             ?.let { status ->
-                val reelText = if (status.limit > 0) "${status.count}/${status.limit}" else "${status.count} reels"
+                val counts = if (status.limit > 0) "${status.count}/${status.limit}" else "${status.count} reels"
                 val suffix = if (status.blocked) " ⛔" else ""
-                "$timeText · $reelText$suffix"
+                "$counts$suffix"
             }
-            ?: timeText
+
+        timerView?.text = listOfNotNull(timeText, dailyText, reelText).joinToString(" · ")
 
         // Change color as time increases; past the (soft) daily limit it's red
         // regardless of how long this particular session has run.
