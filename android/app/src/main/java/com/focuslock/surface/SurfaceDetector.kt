@@ -13,13 +13,35 @@ enum class SurfaceMode {
     }
 }
 
-/** A doomscroll surface we can detect inside a specific app. */
-enum class BlockableSurface(val wireKey: String, val packageName: String) {
-    INSTAGRAM_REELS("instagram_reels", "com.instagram.android"),
-    YOUTUBE_SHORTS("youtube_shorts", "com.google.android.youtube");
+/**
+ * A doomscroll surface we can detect inside a specific app. [packageNames] includes
+ * known modded builds (Morphe/ReVanced/RVX rename the applicationId but ship the
+ * same UI); [resourcePrefix] is the stock resource-table package, which mods
+ * usually leave untouched — view-ID probes try it alongside the runtime package.
+ */
+enum class BlockableSurface(
+    val wireKey: String,
+    val packageNames: Set<String>,
+    val resourcePrefix: String
+) {
+    INSTAGRAM_REELS(
+        "instagram_reels",
+        setOf("com.instagram.android"),
+        "com.instagram.android"
+    ),
+    YOUTUBE_SHORTS(
+        "youtube_shorts",
+        setOf(
+            "com.google.android.youtube",
+            "app.morphe.android.youtube",
+            "app.revanced.android.youtube",
+            "app.rvx.android.youtube"
+        ),
+        "com.google.android.youtube"
+    );
 
     companion object {
-        fun byPackage(pkg: String): BlockableSurface? = entries.firstOrNull { it.packageName == pkg }
+        fun byPackage(pkg: String): BlockableSurface? = entries.firstOrNull { pkg in it.packageNames }
     }
 }
 
@@ -31,31 +53,48 @@ enum class BlockableSurface(val wireKey: String, val packageName: String) {
  * crash or a wrong-app block (fail-open by construction).
  */
 object SurfaceMarkers {
-    // Source view IDs of the vertical pager that hosts the reel/short stream.
-    // TYPE_VIEW_SCROLLED events from these IDs are pager advances; scrolls from any
-    // other ID (comments sheet, feed, chip row) are a different view and are ignored.
-    val pagerIds: Map<BlockableSurface, Set<String>> = mapOf(
+    // Bare resource-entry names of the vertical pager that hosts the reel/short
+    // stream (no package prefix — modded builds may report either the stock or
+    // their own package in viewIdResourceName). TYPE_VIEW_SCROLLED events whose
+    // source entry-name matches are pager advances; scrolls from any other ID
+    // (comments sheet, feed, chip row) are a different view and are ignored.
+    val pagerIdNames: Map<BlockableSurface, Set<String>> = mapOf(
         BlockableSurface.INSTAGRAM_REELS to setOf(
-            "com.instagram.android:id/clips_viewer_view_pager"
+            "clips_viewer_view_pager"
         ),
         BlockableSurface.YOUTUBE_SHORTS to setOf(
-            "com.google.android.youtube:id/reel_recycler"
+            "reel_recycler"
         )
     )
 
-    // IDs whose presence anywhere in the window means the viewer surface is on
-    // screen (superset of pagerIds — probed via findAccessibilityNodeInfosByViewId).
-    val presenceIds: Map<BlockableSurface, Set<String>> = mapOf(
+    // Entry names whose presence anywhere in the window means the viewer surface
+    // is on screen (superset of pagerIdNames).
+    val presenceIdNames: Map<BlockableSurface, Set<String>> = mapOf(
         BlockableSurface.INSTAGRAM_REELS to setOf(
-            "com.instagram.android:id/clips_viewer_view_pager",
-            "com.instagram.android:id/clips_video_container"
+            "clips_viewer_view_pager",
+            "clips_video_container"
         ),
         BlockableSurface.YOUTUBE_SHORTS to setOf(
-            "com.google.android.youtube:id/reel_recycler",
-            "com.google.android.youtube:id/reel_watch_fragment_root",
-            "com.google.android.youtube:id/reel_player_page_container"
+            "reel_recycler",
+            "reel_watch_fragment_root",
+            "reel_player_page_container"
         )
     )
+
+    /** "com.pkg:id/some_view" → "some_view"; null when the ID has no entry part. */
+    fun entryName(viewIdResourceName: String?): String? =
+        viewIdResourceName?.substringAfter(":id/", missingDelimiterValue = "")?.ifEmpty { null }
+
+    /**
+     * Fully-qualified ID candidates to probe via findAccessibilityNodeInfosByViewId:
+     * the stock resource prefix plus the runtime package (modded builds may remap
+     * the resource table to their renamed package).
+     */
+    fun presenceIdCandidates(surface: BlockableSurface, runtimePackage: String): List<String> {
+        val names = presenceIdNames[surface] ?: return emptyList()
+        val prefixes = linkedSetOf(surface.resourcePrefix, runtimePackage)
+        return names.flatMap { name -> prefixes.map { prefix -> "$prefix:id/$name" } }
+    }
 
     // Best-effort ad markers for the reel counter. Neither platform exposes a real
     // "this is an ad" flag over the accessibility API — this is a text-label
@@ -169,14 +208,15 @@ class SurfaceSessionTracker(
         if (current == null || current.surface != surface) {
             if (mode == SurfaceMode.BLOCK) return pressBack(nowMs)
             // Missed the entry event (e.g. service reconnected mid-viewer) — adopt
-            // this scroll as the start of a one-at-a-time session.
-            val entry = State.InViewer(
+            // this scroll as the start of a one-at-a-time session. Returned as
+            // GRANT_ENTRY so the caller counts it: silently-adopted sessions were
+            // previously invisible to the daily reel counter.
+            state = State.InViewer(
                 surface = surface,
-                entryIndex = if (fromIndex >= 0) fromIndex else null,
+                entryIndex = if (toIndex >= 0) toIndex else if (fromIndex >= 0) fromIndex else null,
                 accumulatedDeltaY = 0
             )
-            state = entry
-            return evaluateAdvance(entry, toIndex, scrollDeltaY, nowMs)
+            return SurfaceDecision.GRANT_ENTRY
         }
 
         return evaluateAdvance(current, toIndex, scrollDeltaY, nowMs)

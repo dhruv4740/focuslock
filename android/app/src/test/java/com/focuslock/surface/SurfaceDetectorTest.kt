@@ -78,11 +78,13 @@ class SurfaceDetectorTest {
     @Test
     fun `advance detected even when the entry event was missed`() {
         val t = tracker()
-        // No onViewerVisible call at all — first thing we see is a scroll.
+        // No onViewerVisible call at all — first thing we see is a scroll. The
+        // adopted session is surfaced as GRANT_ENTRY so it gets counted against
+        // the daily reel limit instead of being invisible to the counter.
         val first = t.onPagerScrolled(
             reels, SurfaceMode.ONE_AT_A_TIME, fromIndex = 0, toIndex = 0, scrollDeltaY = 0, nowMs = 0L
         )
-        assertEquals(SurfaceDecision.ALLOW, first)
+        assertEquals(SurfaceDecision.GRANT_ENTRY, first)
         val second = t.onPagerScrolled(
             reels, SurfaceMode.ONE_AT_A_TIME, fromIndex = 0, toIndex = 1, scrollDeltaY = 0, nowMs = 50L
         )
@@ -187,7 +189,32 @@ class SurfaceDetectorTest {
     fun `BlockableSurface byPackage resolves known packages only`() {
         assertSame(BlockableSurface.INSTAGRAM_REELS, BlockableSurface.byPackage("com.instagram.android"))
         assertSame(BlockableSurface.YOUTUBE_SHORTS, BlockableSurface.byPackage("com.google.android.youtube"))
+        // Modded YouTube builds (renamed applicationId, same UI) map to the same surface.
+        assertSame(BlockableSurface.YOUTUBE_SHORTS, BlockableSurface.byPackage("app.morphe.android.youtube"))
+        assertSame(BlockableSurface.YOUTUBE_SHORTS, BlockableSurface.byPackage("app.revanced.android.youtube"))
         assertNull(BlockableSurface.byPackage("com.whatsapp"))
+    }
+
+    @Test
+    fun `entryName strips the package prefix from view resource IDs`() {
+        assertEquals("reel_recycler", SurfaceMarkers.entryName("com.google.android.youtube:id/reel_recycler"))
+        assertEquals("reel_recycler", SurfaceMarkers.entryName("app.morphe.android.youtube:id/reel_recycler"))
+        assertNull(SurfaceMarkers.entryName("no-id-separator"))
+        assertNull(SurfaceMarkers.entryName(null))
+    }
+
+    @Test
+    fun `presence candidates cover stock and runtime package prefixes`() {
+        val candidates = SurfaceMarkers.presenceIdCandidates(
+            BlockableSurface.YOUTUBE_SHORTS, "app.morphe.android.youtube"
+        )
+        assert("com.google.android.youtube:id/reel_recycler" in candidates)
+        assert("app.morphe.android.youtube:id/reel_recycler" in candidates)
+        // Stock runtime package produces no duplicates.
+        val stock = SurfaceMarkers.presenceIdCandidates(
+            BlockableSurface.YOUTUBE_SHORTS, "com.google.android.youtube"
+        )
+        assertEquals(stock.size, stock.toSet().size)
     }
 
     @Test
@@ -196,9 +223,10 @@ class SurfaceDetectorTest {
         t.onViewerVisible(reels, SurfaceMode.ONE_AT_A_TIME, 0L)
         t.onPagerScrolled(reels, SurfaceMode.ONE_AT_A_TIME, fromIndex = -1, toIndex = 0, scrollDeltaY = 0, nowMs = 10L)
         t.reset()
-        // After reset, an advance-shaped scroll is treated as a fresh entry, not a block.
+        // After reset, an advance-shaped scroll is treated as a fresh (counted)
+        // entry — adopted as a new one-at-a-time session, not a block.
         assertEquals(
-            SurfaceDecision.ALLOW,
+            SurfaceDecision.GRANT_ENTRY,
             t.onPagerScrolled(reels, SurfaceMode.ONE_AT_A_TIME, fromIndex = 5, toIndex = 5, scrollDeltaY = 0, nowMs = 20L)
         )
     }

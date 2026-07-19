@@ -28,6 +28,8 @@ object SurfaceBlocker {
     private const val TAG = "SurfaceBlocker"
     private const val PRESENCE_PROBE_THROTTLE_MS = 500L
     private const val FLUSH_THROTTLE_MS = 15_000L
+    private const val GONE_HYSTERESIS_MS = 1200L
+    private const val COUNTS_PREFS_NAME = "FocusLockReelCounts"
 
     @Volatile private var modes: Map<BlockableSurface, SurfaceMode> = emptyMap()
     @Volatile private var reelLimits: Map<BlockableSurface, Int> = emptyMap()
@@ -36,10 +38,40 @@ object SurfaceBlocker {
     @Volatile private var trackedDate: String = ""
     @Volatile private var activeSessionSurface: BlockableSurface? = null
     @Volatile private var lastFlushAtMs = 0L
+    @Volatile private var appContext: android.content.Context? = null
 
     private val tracker = SurfaceSessionTracker()
     private val flushExecutor = Executors.newSingleThreadExecutor()
     @Volatile private var lastProbeAtMs = 0L
+    @Volatile private var lastPresentAtMs = 0L
+
+    /**
+     * Restores today's locally persisted counts so the badge and the daily limit
+     * are correct immediately after a process restart — the Firestore seed arrives
+     * later (or never, offline) and merges via [seedReelCounts]. Local persistence
+     * exists because up to [FLUSH_THROTTLE_MS] of count deltas used to die with
+     * the process, silently losing reels from the daily quota.
+     */
+    fun init(context: android.content.Context) {
+        appContext = context.applicationContext
+        val prefs = context.applicationContext
+            .getSharedPreferences(COUNTS_PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        val savedDate = prefs.getString("date", "") ?: ""
+        if (savedDate == LocalDate.now().toString() && trackedDate.isEmpty()) {
+            trackedDate = savedDate
+            reelCounts = BlockableSurface.entries
+                .associateWith { prefs.getInt("count_${it.wireKey}", 0) }
+                .filterValues { it > 0 }
+        }
+    }
+
+    private fun persistCounts() {
+        val ctx = appContext ?: return
+        val editor = ctx.getSharedPreferences(COUNTS_PREFS_NAME, android.content.Context.MODE_PRIVATE).edit()
+        editor.putString("date", trackedDate)
+        BlockableSurface.entries.forEach { editor.putInt("count_${it.wireKey}", reelCounts[it] ?: 0) }
+        editor.apply()
+    }
 
     val isActive: Boolean
         get() = modes.values.any { it != SurfaceMode.OFF }
@@ -69,13 +101,29 @@ object SurfaceBlocker {
 
     /** Called once from UsageMonitorService.onCreate() to seed today's counts from Firestore. */
     fun seedReelCounts(date: String, counts: Map<String, Int>) {
-        // Preserve any not-yet-flushed increments recorded before this seed arrived
-        // (accessibility events can start flowing before the Firestore read returns).
+        // Merge, don't overwrite: in-memory counts may already hold today's locally
+        // persisted total (init) plus increments recorded before this seed arrived.
+        // Only this device increments counts, so max() is the true total; when the
+        // local side is ahead (deltas died unflushed with a previous process), the
+        // difference is re-queued so Firestore catches up.
         val carryOver = pendingDelta
+        val localCounts = if (trackedDate == date) reelCounts else emptyMap()
         trackedDate = date
-        reelCounts = BlockableSurface.entries.associateWith { surface ->
-            (counts[surface.wireKey] ?: 0) + (carryOver[surface] ?: 0)
+        val merged = BlockableSurface.entries.associateWith { surface ->
+            maxOf(
+                localCounts[surface] ?: 0,
+                (counts[surface.wireKey] ?: 0) + (carryOver[surface] ?: 0)
+            )
         }
+        val missingFromServer = BlockableSurface.entries.mapNotNull { surface ->
+            val missing = (merged[surface] ?: 0) - (counts[surface.wireKey] ?: 0) - (carryOver[surface] ?: 0)
+            if (missing > 0) surface to ((carryOver[surface] ?: 0) + missing) else null
+        }.toMap()
+        reelCounts = merged
+        if (missingFromServer.isNotEmpty()) {
+            pendingDelta = carryOver + missingFromServer
+        }
+        persistCounts()
     }
 
     fun reset() {
@@ -113,17 +161,23 @@ object SurfaceBlocker {
         trackedDate = today
         reelCounts = emptyMap()
         pendingDelta = emptyMap()
+        persistCounts()
     }
 
-    private fun recordReelView(surface: BlockableSurface, root: AccessibilityNodeInfo) {
-        val keywords = SurfaceMarkers.adKeywords[surface] ?: emptySet()
-        val looksLikeAd = keywords.any { kw -> !root.findAccessibilityNodeInfosByText(kw).isNullOrEmpty() }
-        if (looksLikeAd) {
-            Log.d(TAG, "Skipping reel count for ${surface.wireKey} — ad heuristic matched")
-            return
+    // Null root (rare — window mid-transition) counts the reel without the ad
+    // check: better to occasionally count an ad than to silently drop real reels.
+    private fun recordReelView(surface: BlockableSurface, root: AccessibilityNodeInfo?) {
+        if (root != null) {
+            val keywords = SurfaceMarkers.adKeywords[surface] ?: emptySet()
+            val looksLikeAd = keywords.any { kw -> !root.findAccessibilityNodeInfosByText(kw).isNullOrEmpty() }
+            if (looksLikeAd) {
+                Log.d(TAG, "Skipping reel count for ${surface.wireKey} — ad heuristic matched")
+                return
+            }
         }
         reelCounts = reelCounts + (surface to ((reelCounts[surface] ?: 0) + 1))
         pendingDelta = pendingDelta + (surface to ((pendingDelta[surface] ?: 0) + 1))
+        persistCounts()
         maybeFlush()
     }
 
@@ -177,8 +231,8 @@ object SurfaceBlocker {
 
         val decision = when (event.eventType) {
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
-                val sourceId = event.source?.viewIdResourceName
-                if (sourceId != null && sourceId in (SurfaceMarkers.pagerIds[surface] ?: emptySet())) {
+                val sourceEntry = SurfaceMarkers.entryName(event.source?.viewIdResourceName)
+                if (sourceEntry != null && sourceEntry in (SurfaceMarkers.pagerIdNames[surface] ?: emptySet())) {
                     tracker.onPagerScrolled(
                         surface = surface,
                         mode = mode,
@@ -192,13 +246,22 @@ object SurfaceBlocker {
                 }
             }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ->
-                probePresence(surface, mode, service, nowMs)
+                probePresence(surface, mode, pkg, service, nowMs)
             else -> null
         }
 
-        if (decision == SurfaceDecision.PRESS_BACK) {
-            Log.d(TAG, "Blocking ${surface.wireKey} — pressing Back")
-            service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+        when (decision) {
+            SurfaceDecision.PRESS_BACK -> {
+                Log.d(TAG, "Blocking ${surface.wireKey} — pressing Back")
+                service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            }
+            SurfaceDecision.GRANT_ENTRY -> {
+                // From a presence probe (normal entry) or a pager scroll (adopted
+                // session whose entry event was missed) — both count one reel.
+                activeSessionSurface = surface
+                recordReelView(surface, service.rootInActiveWindow)
+            }
+            else -> {}
         }
     }
 
@@ -207,6 +270,7 @@ object SurfaceBlocker {
     private fun probePresence(
         surface: BlockableSurface,
         mode: SurfaceMode,
+        pkg: String,
         service: AccessibilityService,
         nowMs: Long
     ): SurfaceDecision? {
@@ -214,7 +278,8 @@ object SurfaceBlocker {
         lastProbeAtMs = nowMs
         rolloverIfNeeded()
 
-        val ids = SurfaceMarkers.presenceIds[surface] ?: return null
+        val ids = SurfaceMarkers.presenceIdCandidates(surface, pkg)
+        if (ids.isEmpty()) return null
         val root = service.rootInActiveWindow ?: return null
         val windowBounds = Rect().also { root.getBoundsInScreen(it) }
         val nodeBounds = Rect()
@@ -238,6 +303,11 @@ object SurfaceBlocker {
         }
 
         if (!present) {
+            // Hysteresis: a comments sheet, share dialog, or IME briefly becoming
+            // the active window makes a single probe miss the viewer that is still
+            // there behind it. Tearing the session down on one miss caused a fresh
+            // GRANT_ENTRY (double count) when the next probe saw the viewer again.
+            if (nowMs - lastPresentAtMs < GONE_HYSTERESIS_MS) return null
             tracker.onViewerGone(nowMs)
             if (activeSessionSurface == surface) {
                 activeSessionSurface = null
@@ -246,13 +316,7 @@ object SurfaceBlocker {
             return null
         }
 
-        return when (val decision = tracker.onViewerVisible(surface, mode, nowMs)) {
-            SurfaceDecision.GRANT_ENTRY -> {
-                activeSessionSurface = surface
-                recordReelView(surface, root)
-                SurfaceDecision.ALLOW
-            }
-            else -> decision
-        }
+        lastPresentAtMs = nowMs
+        return tracker.onViewerVisible(surface, mode, nowMs)
     }
 }
