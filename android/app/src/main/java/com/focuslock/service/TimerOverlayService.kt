@@ -193,9 +193,11 @@ class TimerOverlayService : Service() {
             }
             ?: timeText
 
-        // Change color as time increases
+        // Change color as time increases; past the (soft) daily limit it's red
+        // regardless of how long this particular session has run.
         timerView?.setBackgroundColor(
             when {
+                UsageMonitorService.isOverLimitSoft -> Color.parseColor("#CCCC0000") // Red — over daily limit
                 minutes >= 25 -> Color.parseColor("#CCCC0000") // Red — way over
                 minutes >= 15 -> Color.parseColor("#CCCC6600") // Orange — getting long
                 minutes >= 5  -> Color.parseColor("#CC666600") // Yellow-ish — moderate

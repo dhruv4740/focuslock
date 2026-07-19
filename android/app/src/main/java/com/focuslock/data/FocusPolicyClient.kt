@@ -10,7 +10,6 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.SetOptions
-import com.focuslock.surface.BlockableSurface
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -54,7 +53,8 @@ object FocusPolicyClient {
         val reason: String,
         val effectiveLimit: Int,
         val usedMinutes: Double,
-        val userUsedMinutes: Double
+        val userUsedMinutes: Double,
+        val hardBlockAfterLimit: Boolean = true
     )
 
     data class ExtensionResult(
@@ -193,14 +193,6 @@ object FocusPolicyClient {
         )
         val policy = policySnap.data ?: mapOf<String, Any>()
 
-        // Apps you've opted into Reels/Shorts surface-blocking on are governed by
-        // that system instead of Block Windows/daily-limit — the only full-app
-        // hard-block trigger left for them is an active Focus Session.
-        @Suppress("UNCHECKED_CAST")
-        val blockedSurfaces = policy["blockedSurfaces"] as? Map<String, String> ?: emptyMap()
-        val surface = packageName?.let { BlockableSurface.byPackage(it) }
-        val isSurfaceManaged = surface != null && (blockedSurfaces[surface.wireKey] ?: "off") != "off"
-
         val usageSnap = Tasks.await(
             db.collection("users").document(userId)
                 .collection("usage_days").document(date).get()
@@ -215,64 +207,43 @@ object FocusPolicyClient {
 
         val focusActive = focus["active"] as? Boolean ?: false
         val focusEndsAt = focus["endsAt"] as? String ?: ""
-        val now = java.time.Instant.now().toString()
-        val focusStillRunning = focusActive && focusEndsAt.isNotEmpty() && focusEndsAt > now
+        val nowIso = java.time.Instant.now().toString()
+        val focusStillRunning = focusActive && focusEndsAt.isNotEmpty() && focusEndsAt > nowIso
 
         @Suppress("UNCHECKED_CAST")
-        val blockWindows = policy["blockWindows"] as? List<Map<String, Any>> ?: emptyList()
-        val inBlockWindow = blockWindows.any { w ->
+        val blockWindows = (policy["blockWindows"] as? List<Map<String, Any>> ?: emptyList()).map { w ->
             val startStr = w["start"] as? String ?: "00:00"
-            val endStr   = w["end"]   as? String ?: "23:59"
+            val endStr = w["end"] as? String ?: "23:59"
             @Suppress("UNCHECKED_CAST")
             val days = (w["days"] as? List<Number>)?.map { it.toInt() } ?: (0..6).toList()
-            val cal = java.util.Calendar.getInstance()
-            val dayOfWeek = cal.get(java.util.Calendar.DAY_OF_WEEK) - 1 // 0=Sun
-            val currentMin = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
             val (sh, sm) = startStr.split(":").map { it.toInt() }
             val (eh, em) = endStr.split(":").map { it.toInt() }
-            dayOfWeek in days && currentMin in (sh * 60 + sm) until (eh * 60 + em)
-        } && !isSurfaceManaged
-
-        val dailyLimitMinutes = (policy["dailyLimitMinutes"] as? Number)?.toInt() ?: 0
-        val extensionMinutes = (policy["extensionMinutes"] as? Number)?.toInt() ?: 15
-        val hardBlockAfterLimit = policy["hardBlockAfterLimit"] as? Boolean ?: false
-
-        // Keep precision as Double throughout; avoid Int truncation
-        val usedMinutes = usage["usedMinutes"] as? Double ?: 0.0
-        val extensionsUsedToday = (usage["extensionsUsedToday"] as? Number)?.toInt() ?: 0
-        val effectiveLimit = dailyLimitMinutes + extensionsUsedToday * extensionMinutes
-
-        if (focusStillRunning || inBlockWindow) {
-            return Decision(
-                allowNow = false,
-                action = "hard-block",
-                reason = if (focusStillRunning) "focus-session-active" else "scheduled-block-window",
-                effectiveLimit = 0,
-                usedMinutes = usedMinutes,
-                userUsedMinutes = usedMinutes
-            )
+            PolicyEngine.BlockWindow(sh * 60 + sm, eh * 60 + em, days.toSet())
         }
 
-        val allowNow = isSurfaceManaged || effectiveLimit == 0 || usedMinutes < effectiveLimit
+        @Suppress("UNCHECKED_CAST")
+        val appModes = policy["appModes"] as? Map<String, String> ?: emptyMap()
 
-        if (!allowNow && hardBlockAfterLimit) {
-            return Decision(
-                allowNow = false,
-                action = "hard-block",
-                reason = "daily-limit-reached",
-                effectiveLimit = effectiveLimit,
-                usedMinutes = usedMinutes,
-                userUsedMinutes = usedMinutes
-            )
-        }
-
-        return Decision(
-            allowNow = allowNow,
-            action = "none",
-            reason = "within-limit",
-            effectiveLimit = effectiveLimit,
-            usedMinutes = usedMinutes,
-            userUsedMinutes = usedMinutes
+        val cal = java.util.Calendar.getInstance()
+        return PolicyEngine.decide(
+            policy = PolicyEngine.PolicyInputs(
+                dailyLimitMinutes = (policy["dailyLimitMinutes"] as? Number)?.toInt() ?: 0,
+                extensionMinutes = (policy["extensionMinutes"] as? Number)?.toInt() ?: 15,
+                hardBlockAfterLimit = policy["hardBlockAfterLimit"] as? Boolean ?: false,
+                blockWindows = blockWindows,
+                appModes = appModes
+            ),
+            usage = PolicyEngine.UsageInputs(
+                // Keep precision as Double throughout; avoid Int truncation
+                usedMinutes = usage["usedMinutes"] as? Double ?: 0.0,
+                extensionsUsedToday = (usage["extensionsUsedToday"] as? Number)?.toInt() ?: 0
+            ),
+            now = PolicyEngine.Now(
+                dayOfWeek = cal.get(java.util.Calendar.DAY_OF_WEEK) - 1, // 0=Sun
+                minuteOfDay = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE),
+                focusSessionActive = focusStillRunning
+            ),
+            packageName = packageName
         )
     }
 
@@ -463,27 +434,17 @@ object FocusPolicyClient {
         )
     }
 
-    fun updatePolicy(policy: PolicyData) {
-        val data = mapOf(
-            "dailyLimitMinutes" to policy.dailyLimitMinutes,
-            "extensionMinutes" to policy.extensionMinutes,
-            "dailyExtensionLimit" to policy.dailyExtensionLimit,
-            "hardBlockAfterLimit" to policy.hardBlockAfterLimit,
-            "targetApps" to policy.targetApps,
-            "targetDomains" to policy.targetDomains,
-            "blockWindows" to policy.blockWindows.map { w ->
-                mapOf(
-                    "start" to (w["start"] as? String ?: "00:00"),
-                    "end" to (w["end"] as? String ?: "23:59"),
-                    "days" to ((w["days"] as? List<*>)?.map { (it as Number).toInt() } ?: (0..6).toList())
-                )
-            },
-            "blockedSurfaces" to policy.blockedSurfaces,
-            "reelDailyLimit" to policy.reelDailyLimit
-        )
+    /**
+     * Merge-writes only the given fields into policy/global. Each editor section
+     * saves its own field set so the Reels card can never clobber Blocking-Rules
+     * edits (or fields the Windows dashboard owns) and vice versa. List/map values
+     * are replaced wholesale — that is the desired per-field semantics.
+     */
+    fun updatePolicyFields(fields: Map<String, Any>) {
+        if (fields.isEmpty()) return
         Tasks.await(
             db.collection("users").document(userId)
-                .collection("policy").document("global").set(data)
+                .collection("policy").document("global").set(fields, SetOptions.merge())
         )
     }
 

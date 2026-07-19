@@ -27,15 +27,23 @@ class UsageMonitorService : Service() {
         private const val CHANNEL_ID_ALERTS = "focuslock-alerts"
         private const val NOTIFICATION_ALERT_ID = 1102
         private const val NOTIFICATION_OVERLAY_PERM_ID = 1103
+        private const val NOTIFICATION_LIMIT_REACHED_ID = 1104
         private const val OVERLAY_COOLDOWN_MS = 3000L
 
         const val ACTION_DISMISS_LOCK_OVERLAY = "com.focuslock.DISMISS_LOCK_OVERLAY"
         const val ACTION_FOREGROUND_CHANGED = "com.focuslock.ACTION_FOREGROUND_CHANGED"
+        const val ACTION_POLICY_UPDATED = "com.focuslock.ACTION_POLICY_UPDATED"
         const val EXTRA_PACKAGE_NAME = "package_name"
 
         // True while the monitor service is alive — lets the UI decide whether to
         // restart it (e.g. after the sync code changes).
         @Volatile var isServiceActive = false
+            private set
+
+        // Over the daily limit with hardBlockAfterLimit OFF: allowed in, but the
+        // badge turns red and friction fires on every open. Read by
+        // TimerOverlayService for the badge color.
+        @Volatile var isOverLimitSoft = false
             private set
 
         // Cross-service shared state — written only from main thread
@@ -59,7 +67,9 @@ class UsageMonitorService : Service() {
     private var localUsedMinutes = 0.0
     private var localEffectiveLimit = 0
     private var localAllowNow = true   // optimistic until first evaluate succeeds
+    private var localHardBlock = true  // hardBlockAfterLimit from the last evaluate
     private var hadSuccessfulEvaluate = false
+    private var limitReachedNotificationSentDate = ""
 
     private var warningNotificationSentDate = ""
     private var overlayPermAlertSentDate = ""
@@ -110,6 +120,12 @@ class UsageMonitorService : Service() {
         when (intent?.action) {
             ACTION_FOREGROUND_CHANGED -> {
                 intent.getStringExtra(EXTRA_PACKAGE_NAME)?.let { handleForegroundChanged(it) }
+            }
+            ACTION_POLICY_UPDATED -> {
+                // A policy Save just happened — re-fetch now, skipping the
+                // 15-minute throttle, so edits take effect immediately.
+                lastPolicyRefreshAt = System.currentTimeMillis()
+                refreshPolicy()
             }
             "com.focuslock.ACTION_FRICTION_BYPASS" -> {
                 val target = intent.getStringExtra(FrictionBarrierService.EXTRA_TARGET)
@@ -228,7 +244,9 @@ class UsageMonitorService : Service() {
         } else {
             val now = System.currentTimeMillis()
             val lastBypass = lastFrictionBypassTimeByPackage[packageName] ?: 0L
-            if (now - lastBypass > FRICTION_COOLDOWN_MS) {
+            // Past the soft limit the 5-min friction cooldown no longer applies —
+            // every open costs the full friction gate.
+            if (isOverLimitSoft || now - lastBypass > FRICTION_COOLDOWN_MS) {
                 showFrictionOverlay(packageName)
             } else {
                 evaluateAndLockIfNeeded(packageName)
@@ -312,9 +330,14 @@ class UsageMonitorService : Service() {
                 localUsedMinutes = decision.usedMinutes
                 localEffectiveLimit = decision.effectiveLimit
                 localAllowNow = decision.allowNow
+                localHardBlock = decision.hardBlockAfterLimit
                 hadSuccessfulEvaluate = true
 
                 handler.post {
+                    isOverLimitSoft = decision.action == "soft-limit"
+                    if (isOverLimitSoft && localEffectiveLimit > 0) {
+                        sendLimitReachedNotification(localEffectiveLimit)
+                    }
                     if (!localAllowNow) {
                         blockedTargets.add(packageName)
                         updateBlockedPreference(true)
@@ -372,10 +395,16 @@ class UsageMonitorService : Service() {
                         sendApproachingLimitNotification(localEffectiveLimit)
                     }
                     if (localUsedMinutes >= localEffectiveLimit) {
-                        blockedTargets.add(packageName)
-                        updateBlockedPreference(true)
-                        showLockOverlay(packageName)
-                        return
+                        if (localHardBlock) {
+                            blockedTargets.add(packageName)
+                            updateBlockedPreference(true)
+                            showLockOverlay(packageName)
+                            return
+                        }
+                        // Soft limit: no lock — flag it (red badge, per-open
+                        // friction) and keep counting.
+                        isOverLimitSoft = true
+                        sendLimitReachedNotification(localEffectiveLimit)
                     }
                 }
                 handler.postDelayed(this, 60_000L)
@@ -398,6 +427,27 @@ class UsageMonitorService : Service() {
             .build()
         (getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager)
             .notify(NOTIFICATION_ALERT_ID, notification)
+    }
+
+    // Fired once per day when the soft limit is crossed (hardBlockAfterLimit OFF):
+    // the app stays usable, so this is the signal that friction mode kicked in.
+    private fun sendLimitReachedNotification(limitMinutes: Int) {
+        val today = LocalDate.now().toString()
+        if (limitReachedNotificationSentDate == today) return
+        limitReachedNotificationSentDate = today
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        }
+        val notification = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID_ALERTS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("FocusLock: Daily Limit Reached")
+            .setContentText("Past your $limitMinutes min limit — every open now goes through the friction gate.")
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .build()
+        (getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager)
+            .notify(NOTIFICATION_LIMIT_REACHED_ID, notification)
     }
 
     private fun stopLocalTimer() {

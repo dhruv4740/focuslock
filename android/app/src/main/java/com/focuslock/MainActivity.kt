@@ -61,10 +61,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var txtReelCounts: TextView
     private lateinit var txtReelsPolicySaved: TextView
 
-    // Display labels for the blocked-surfaces spinners, positionally mapped to
-    // the wire values stored in PolicyData.blockedSurfaces / SurfaceMode.fromWire.
-    private val surfaceModeLabels = arrayOf("Off", "Block entirely", "One at a time")
-    private val surfaceModeWireValues = arrayOf("off", "block", "one_at_a_time")
+    // Blocked-surfaces spinner options: wire value paired with its display label,
+    // so reordering the list can never silently corrupt the saved mode.
+    private val surfaceModeOptions = listOf(
+        "off" to "Off",
+        "block" to "Block entirely",
+        "one_at_a_time" to "One at a time"
+    )
+
+    private fun spinnerWireValue(spinner: Spinner): String =
+        surfaceModeOptions[spinner.selectedItemPosition.coerceIn(surfaceModeOptions.indices)].first
+
+    private fun spinnerIndexOf(wire: String?): Int =
+        surfaceModeOptions.indexOfFirst { it.first == wire }.coerceAtLeast(0)
 
     // Weekly chart
     private lateinit var layoutWeeklyChart: LinearLayout
@@ -289,7 +298,9 @@ class MainActivity : AppCompatActivity() {
     // ── Policy Editor ─────────────────────────────────────────────────────────
 
     private fun setupPolicyEditor() {
-        val surfaceModeAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, surfaceModeLabels)
+        val surfaceModeAdapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_item, surfaceModeOptions.map { it.second }
+        )
         surfaceModeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinnerInstagramReels.adapter = surfaceModeAdapter
         spinnerYoutubeShorts.adapter = surfaceModeAdapter
@@ -332,46 +343,78 @@ class MainActivity : AppCompatActivity() {
             renderBlockWindows()
         }
 
-        // Save policy — two entry points (this card and the Reels & Shorts card
-        // above) both save the same full PolicyData, so a change made in either
-        // card can be saved without hunting for "the right" Save button.
+        // Each Save button writes only its own card's fields (merge write) — the
+        // Reels card can no longer clobber Blocking-Rules edits and vice versa,
+        // and neither touches fields the Windows dashboard owns (targetDomains).
         findViewById<Button>(R.id.btnSavePolicy).setOnClickListener { btn ->
-            savePolicy(btn, txtPolicySaved)
+            saveBlockingRules(btn, txtPolicySaved)
         }
         findViewById<Button>(R.id.btnSaveReelsPolicy).setOnClickListener { btn ->
-            savePolicy(btn, txtReelsPolicySaved)
+            saveReelsPolicy(btn, txtReelsPolicySaved)
         }
 
         loadPolicyIntoEditor()
     }
 
-    private fun savePolicy(btn: View, confirmationView: TextView) {
+    private fun saveBlockingRules(btn: View, confirmationView: TextView) {
         val policy = currentPolicy ?: return
         val dailyLimit = editDailyLimit.text.toString().trim().toIntOrNull() ?: policy.dailyLimitMinutes
         val extMins = editExtensionMins.text.toString().trim().toIntOrNull() ?: policy.extensionMinutes
         val extLimit = editExtensionLimit.text.toString().trim().toIntOrNull() ?: policy.dailyExtensionLimit
+        val hardBlock = switchHardBlock.isChecked
+        currentPolicy = policy.copy(
+            dailyLimitMinutes = dailyLimit,
+            extensionMinutes = extMins,
+            dailyExtensionLimit = extLimit,
+            hardBlockAfterLimit = hardBlock
+        )
+        saveFields(
+            btn, confirmationView,
+            mapOf(
+                "dailyLimitMinutes" to dailyLimit,
+                "extensionMinutes" to extMins,
+                "dailyExtensionLimit" to extLimit,
+                "hardBlockAfterLimit" to hardBlock,
+                "targetApps" to (currentPolicy?.targetApps ?: emptyList<String>()),
+                "blockWindows" to (currentPolicy?.blockWindows ?: emptyList<Map<String, Any>>())
+            )
+        )
+    }
+
+    private fun saveReelsPolicy(btn: View, confirmationView: TextView) {
+        val policy = currentPolicy ?: return
         val blockedSurfaces = mapOf(
-            "instagram_reels" to surfaceModeWireValues[spinnerInstagramReels.selectedItemPosition],
-            "youtube_shorts" to surfaceModeWireValues[spinnerYoutubeShorts.selectedItemPosition]
+            "instagram_reels" to spinnerWireValue(spinnerInstagramReels),
+            "youtube_shorts" to spinnerWireValue(spinnerYoutubeShorts)
         )
         val reelDailyLimit = mapOf(
             "instagram_reels" to (editReelLimitInstagram.text.toString().trim().toIntOrNull() ?: 0),
             "youtube_shorts" to (editReelLimitYoutube.text.toString().trim().toIntOrNull() ?: 0)
         )
-        val updated = policy.copy(
-            dailyLimitMinutes = dailyLimit,
-            extensionMinutes = extMins,
-            dailyExtensionLimit = extLimit,
-            hardBlockAfterLimit = switchHardBlock.isChecked,
-            blockedSurfaces = blockedSurfaces,
-            reelDailyLimit = reelDailyLimit
-        )
-        currentPolicy = updated
+        currentPolicy = policy.copy(blockedSurfaces = blockedSurfaces, reelDailyLimit = reelDailyLimit)
+        saveFields(
+            btn, confirmationView,
+            mapOf("blockedSurfaces" to blockedSurfaces, "reelDailyLimit" to reelDailyLimit)
+        ) {
+            SurfaceBlocker.updateConfig(blockedSurfaces, reelDailyLimit)
+        }
+    }
+
+    private fun saveFields(
+        btn: View,
+        confirmationView: TextView,
+        fields: Map<String, Any>,
+        afterSave: () -> Unit = {}
+    ) {
         btn.isEnabled = false
         Thread {
             try {
-                FocusPolicyClient.updatePolicy(updated)
-                SurfaceBlocker.updateConfig(blockedSurfaces, reelDailyLimit)
+                FocusPolicyClient.updatePolicyFields(fields)
+                afterSave()
+                // Tell the monitor to re-fetch immediately instead of waiting out
+                // its 15-minute policy refresh throttle.
+                startService(Intent(this, UsageMonitorService::class.java)
+                    .setAction(UsageMonitorService.ACTION_POLICY_UPDATED))
                 runOnUiThread {
                     confirmationView.visibility = View.VISIBLE
                     confirmationView.postDelayed({ confirmationView.visibility = View.GONE }, 2000)
@@ -398,12 +441,8 @@ class MainActivity : AppCompatActivity() {
                     switchHardBlock.isChecked = policy.hardBlockAfterLimit
                     renderTargetApps()
                     renderBlockWindows()
-                    spinnerInstagramReels.setSelection(
-                        surfaceModeWireValues.indexOf(policy.blockedSurfaces["instagram_reels"] ?: "off").coerceAtLeast(0)
-                    )
-                    spinnerYoutubeShorts.setSelection(
-                        surfaceModeWireValues.indexOf(policy.blockedSurfaces["youtube_shorts"] ?: "off").coerceAtLeast(0)
-                    )
+                    spinnerInstagramReels.setSelection(spinnerIndexOf(policy.blockedSurfaces["instagram_reels"]))
+                    spinnerYoutubeShorts.setSelection(spinnerIndexOf(policy.blockedSurfaces["youtube_shorts"]))
                     val igLimit = policy.reelDailyLimit["instagram_reels"] ?: 0
                     val ytLimit = policy.reelDailyLimit["youtube_shorts"] ?: 0
                     editReelLimitInstagram.setText(if (igLimit > 0) igLimit.toString() else "")
@@ -648,12 +687,22 @@ class MainActivity : AppCompatActivity() {
                         focusSessionText.setTextColor(getColor(R.color.text_secondary))
                     }
 
+                    // Render from the same decision the enforcement path uses, so
+                    // the dashboard never disagrees with actual on-device behavior.
                     val used = evaluateResult.usedMinutes
                     val limit = evaluateResult.effectiveLimit
-                    todayMinutesText.text = if (limit > 0) "${"%.1f".format(used)} / $limit min" else "${"%.1f".format(used)} min used"
+                    val baseText = if (limit > 0) "${"%.1f".format(used)} / $limit min" else "${"%.1f".format(used)} min used"
+                    todayMinutesText.text = when (evaluateResult.action) {
+                        "soft-limit" -> "$baseText · over limit (friction mode)"
+                        "hard-block" -> "$baseText · blocked"
+                        else -> baseText
+                    }
                     todayMinutesText.setTextColor(
-                        if (used >= limit && limit > 0) getColor(R.color.color_danger)
-                        else getColor(R.color.text_primary)
+                        when (evaluateResult.action) {
+                            "hard-block" -> getColor(R.color.color_danger)
+                            "soft-limit" -> getColor(R.color.color_warning)
+                            else -> getColor(R.color.text_primary)
+                        }
                     )
 
                     val opens = stats.optInt("opensToday", 0)
