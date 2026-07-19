@@ -98,6 +98,11 @@ class UsageMonitorService : Service() {
     private val networkExecutor = Executors.newSingleThreadExecutor()
     private val isRunning = AtomicBoolean(false)
 
+    // Session chunking: after sessionMaxMinutes of cumulative managed-app use,
+    // a sessionBreakMinutes hard break locks all managed apps.
+    private val chunkTracker = SessionChunkTracker()
+    private var chunkCapRunnable: Runnable? = null
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     override fun onCreate() {
@@ -233,6 +238,14 @@ class UsageMonitorService : Service() {
             return
         }
 
+        // Session-chunk gate: during a forced break every managed app is locked.
+        val gate = chunkTracker.onTargetOpened(timestamp)
+        if (gate is SessionChunkTracker.Gate.InBreak) {
+            Log.d(TAG, "Chunk break active — blocking $packageName")
+            showBreakOverlay(gate.untilMs)
+            return
+        }
+
         currentForegroundTarget = packageName
 
         // Cancel any pending session-close debounce for this package
@@ -243,6 +256,7 @@ class UsageMonitorService : Service() {
         }
 
         showTimerOverlay(packageName)
+        scheduleChunkCap()
 
         if (blockedTargets.contains(packageName)) {
             showLockOverlay(packageName)
@@ -266,6 +280,10 @@ class UsageMonitorService : Service() {
         if (currentForegroundTarget != packageName) return
         Log.d(TAG, "Target closed: $packageName — starting 5 s debounce")
         currentForegroundTarget = null
+
+        chunkTracker.onTargetClosed(System.currentTimeMillis())
+        chunkCapRunnable?.let { handler.removeCallbacks(it) }
+        chunkCapRunnable = null
 
         stopLocalTimer()
         dismissLockOverlay()
@@ -311,12 +329,15 @@ class UsageMonitorService : Service() {
                 val resolved = (docTargets + wireModes.keys).associateWith { pkg ->
                     com.focuslock.data.AppMode.fromWire(wireModes[pkg], pkg in docTargets)
                 }
+                val sessionMax = policyJson.optInt("sessionMaxMinutes", 0)
+                val sessionBreak = policyJson.optInt("sessionBreakMinutes", 0)
                 handler.post {
                     appModes.clear()
                     appModes.putAll(resolved)
                     targetApps.clear()
                     targetApps.addAll(resolved.filterValues { it != com.focuslock.data.AppMode.OFF }.keys)
-                    Log.d(TAG, "Policy refreshed: targetApps=$targetApps modes=$appModes")
+                    chunkTracker.configure(sessionMax, sessionBreak)
+                    Log.d(TAG, "Policy refreshed: targetApps=$targetApps modes=$appModes chunk=$sessionMax/$sessionBreak")
                     // Replay the current foreground app: its forwards may have
                     // been deduped away while targetApps was still empty.
                     // Idempotent — a no-op if it's already the tracked target.
@@ -580,6 +601,44 @@ class UsageMonitorService : Service() {
                 .apply { action = FrictionBarrierService.ACTION_DISMISS })
         } catch (e: Exception) {
             Log.w(TAG, "dismissFrictionOverlay failed", e)
+        }
+    }
+
+    // ── Session-chunk break ───────────────────────────────────────────────────
+
+    // Fires when the cumulative chunk budget runs out while a managed app is
+    // open: finalize the session, kick to home, show the break countdown.
+    private fun scheduleChunkCap() {
+        chunkCapRunnable?.let { handler.removeCallbacks(it) }
+        chunkCapRunnable = null
+        val delayMs = chunkTracker.msUntilCap(System.currentTimeMillis()) ?: return
+        val runnable = Runnable {
+            chunkCapRunnable = null
+            val pkg = currentForegroundTarget ?: return@Runnable
+            val now = System.currentTimeMillis()
+            val untilMs = chunkTracker.startBreak(now)
+            Log.d(TAG, "Session chunk cap hit — break for ${(untilMs - now) / 1000}s")
+            handleTargetAppClosed(pkg, now)
+            showBreakOverlay(untilMs)
+        }
+        chunkCapRunnable = runnable
+        handler.postDelayed(runnable, delayMs.coerceAtLeast(250L))
+    }
+
+    private fun showBreakOverlay(untilMs: Long) {
+        if (!Settings.canDrawOverlays(this)) {
+            notifyOverlayPermissionMissing()
+            return
+        }
+        // Same barrier semantics as the lock overlay: ignore the launcher
+        // window-change triggered by sending the app to the background.
+        isLockOverlayActive = true
+        sendBlockedAppToBackground()
+        try {
+            startService(Intent(this, BreakOverlayService::class.java)
+                .putExtra(BreakOverlayService.EXTRA_BREAK_UNTIL, untilMs))
+        } catch (e: Exception) {
+            Log.w(TAG, "showBreakOverlay failed", e)
         }
     }
 

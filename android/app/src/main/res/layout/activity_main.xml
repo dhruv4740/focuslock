@@ -552,6 +552,58 @@
                         android:maxLines="1" />
                 </LinearLayout>
 
+                <!-- Session chunking: use for X minutes, then a forced break -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="12dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Use for (min) / break for (min)"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp" />
+
+                    <EditText
+                        android:id="@+id/editSessionMax"
+                        android:layout_width="64dp"
+                        android:layout_height="wrap_content"
+                        android:hint="0=off"
+                        android:textColorHint="@color/text_secondary"
+                        android:inputType="number"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp"
+                        android:padding="8dp"
+                        android:background="@drawable/edittext_background"
+                        android:maxLines="1"
+                        android:layout_marginEnd="6dp" />
+
+                    <EditText
+                        android:id="@+id/editSessionBreak"
+                        android:layout_width="64dp"
+                        android:layout_height="wrap_content"
+                        android:hint="2"
+                        android:textColorHint="@color/text_secondary"
+                        android:inputType="number"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp"
+                        android:padding="8dp"
+                        android:background="@drawable/edittext_background"
+                        android:maxLines="1" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="After each chunk of continuous use, all managed apps hard-lock for the break — stops home-feed doomscrolling around the reel blocker."
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp"
+                    android:layout_marginTop="4dp" />
+
                 <!-- Extension settings -->
                 <LinearLayout
                     android:layout_width="match_parent"

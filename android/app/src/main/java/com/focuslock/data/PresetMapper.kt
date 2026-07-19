@@ -36,6 +36,8 @@ object PresetMapper {
         }
         (bundle["dailyLimitMinutes"] as? Number)?.let { fields["dailyLimitMinutes"] = it.toInt() }
         (bundle["hardBlockAfterLimit"] as? Boolean)?.let { fields["hardBlockAfterLimit"] = it }
+        (bundle["sessionMaxMinutes"] as? Number)?.let { fields["sessionMaxMinutes"] = it.toInt() }
+        (bundle["sessionBreakMinutes"] as? Number)?.let { fields["sessionBreakMinutes"] = it.toInt() }
         @Suppress("UNCHECKED_CAST")
         (bundle["blockedSurfaces"] as? Map<String, String>)?.let { fields["blockedSurfaces"] = it }
         @Suppress("UNCHECKED_CAST")
@@ -71,6 +73,8 @@ object PresetMapper {
                 "hardBlockAfterLimit" to false,
                 "blockedSurfaces" to allSurfacesTo("one_at_a_time"),
                 "reelDailyLimit" to reelDailyLimit,
+                "sessionMaxMinutes" to 20,
+                "sessionBreakMinutes" to 1,
                 "frictionSteps" to mapOf("enable_breathing" to true, "enable_delay" to true)
             )
             BUILTIN_FOCUS -> mapOf(
@@ -80,6 +84,8 @@ object PresetMapper {
                 "hardBlockAfterLimit" to false,
                 "blockedSurfaces" to allSurfacesTo("one_at_a_time"),
                 "reelDailyLimit" to reelDailyLimit,
+                "sessionMaxMinutes" to 15,
+                "sessionBreakMinutes" to 2,
                 "frictionSteps" to mapOf(
                     "enable_breathing" to true, "enable_delay" to true,
                     "enable_intention" to true, "enable_stats" to true
@@ -92,6 +98,8 @@ object PresetMapper {
                 "hardBlockAfterLimit" to true,
                 "blockedSurfaces" to allSurfacesTo("block"),
                 "reelDailyLimit" to reelDailyLimit,
+                "sessionMaxMinutes" to 10,
+                "sessionBreakMinutes" to 3,
                 "frictionSteps" to mapOf(
                     "enable_breathing" to true, "enable_delay" to true,
                     "enable_intention" to true, "enable_shake" to true,

@@ -184,6 +184,8 @@ object FocusPolicyClient {
             put("blockedSurfaces", JSONObject(blockedSurfaces))
             put("reelDailyLimit", JSONObject(reelDailyLimit.mapValues { it.value.toInt() }))
             put("appModes", JSONObject(appModes))
+            put("sessionMaxMinutes", (data["sessionMaxMinutes"] as? Number)?.toInt() ?: 0)
+            put("sessionBreakMinutes", (data["sessionBreakMinutes"] as? Number)?.toInt() ?: 0)
         }
     }
 
@@ -422,7 +424,11 @@ object FocusPolicyClient {
         // dashboard round-trips them untouched).
         val appModes: Map<String, String> = emptyMap(),
         val presets: Map<String, Map<String, Any>> = emptyMap(),
-        val activePresetId: String = ""
+        val activePresetId: String = "",
+        // Session chunking: after sessionMaxMinutes of cumulative managed-app
+        // use, a sessionBreakMinutes hard break. 0 = disabled.
+        val sessionMaxMinutes: Int = 0,
+        val sessionBreakMinutes: Int = 0
     )
 
     fun getPolicy(): PolicyData {
@@ -451,7 +457,9 @@ object FocusPolicyClient {
                 .mapValues { it.value.toInt() },
             appModes = (data["appModes"] as? Map<String, String>) ?: emptyMap(),
             presets = (data["presets"] as? Map<String, Map<String, Any>>) ?: emptyMap(),
-            activePresetId = data["activePresetId"] as? String ?: ""
+            activePresetId = data["activePresetId"] as? String ?: "",
+            sessionMaxMinutes = (data["sessionMaxMinutes"] as? Number)?.toInt() ?: 0,
+            sessionBreakMinutes = (data["sessionBreakMinutes"] as? Number)?.toInt() ?: 0
         )
     }
 

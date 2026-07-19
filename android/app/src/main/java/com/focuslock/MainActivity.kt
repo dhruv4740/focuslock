@@ -484,6 +484,10 @@ class MainActivity : AppCompatActivity() {
         val extMins = editExtensionMins.text.toString().trim().toIntOrNull() ?: policy.extensionMinutes
         val extLimit = editExtensionLimit.text.toString().trim().toIntOrNull() ?: policy.dailyExtensionLimit
         val hardBlock = switchHardBlock.isChecked
+        val sessionMax = findViewById<EditText>(R.id.editSessionMax).text.toString().trim().toIntOrNull()
+            ?: policy.sessionMaxMinutes
+        val sessionBreak = findViewById<EditText>(R.id.editSessionBreak).text.toString().trim().toIntOrNull()
+            ?: policy.sessionBreakMinutes
         // Every target gets a mode entry (default LIMIT); targetApps stays the
         // derived set of non-off modes so the Windows agent keeps working.
         val appModes = policy.targetApps
@@ -495,7 +499,9 @@ class MainActivity : AppCompatActivity() {
             dailyExtensionLimit = extLimit,
             hardBlockAfterLimit = hardBlock,
             targetApps = appModes.keys.toList(),
-            appModes = appModes
+            appModes = appModes,
+            sessionMaxMinutes = sessionMax,
+            sessionBreakMinutes = sessionBreak
         )
         saveFields(
             btn, confirmationView,
@@ -506,7 +512,9 @@ class MainActivity : AppCompatActivity() {
                 "hardBlockAfterLimit" to hardBlock,
                 "targetApps" to appModes.keys.toList(),
                 "appModes" to appModes,
-                "blockWindows" to (currentPolicy?.blockWindows ?: emptyList<Map<String, Any>>())
+                "blockWindows" to (currentPolicy?.blockWindows ?: emptyList<Map<String, Any>>()),
+                "sessionMaxMinutes" to sessionMax,
+                "sessionBreakMinutes" to sessionBreak
             )
         )
     }
@@ -569,6 +577,10 @@ class MainActivity : AppCompatActivity() {
                     editExtensionMins.setText(policy.extensionMinutes.toString())
                     editExtensionLimit.setText(policy.dailyExtensionLimit.toString())
                     switchHardBlock.isChecked = policy.hardBlockAfterLimit
+                    findViewById<EditText>(R.id.editSessionMax)
+                        .setText(if (policy.sessionMaxMinutes > 0) policy.sessionMaxMinutes.toString() else "")
+                    findViewById<EditText>(R.id.editSessionBreak)
+                        .setText(if (policy.sessionBreakMinutes > 0) policy.sessionBreakMinutes.toString() else "")
                     renderTargetApps()
                     renderBlockWindows()
                     spinnerInstagramReels.setSelection(spinnerIndexOf(policy.blockedSurfaces["instagram_reels"]))
