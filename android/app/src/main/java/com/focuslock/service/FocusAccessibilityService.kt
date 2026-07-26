@@ -49,16 +49,16 @@ class FocusAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val packageName = event.packageName?.toString() ?: return
-            if (packageName != lastForwardedPackage || !UsageMonitorService.isServiceActive) {
+        val pkg = event.packageName?.toString()
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != null) {
+            if (pkg != lastForwardedPackage || !UsageMonitorService.isServiceActive) {
                 val intent = Intent(this, UsageMonitorService::class.java).apply {
                     action = "com.focuslock.ACTION_FOREGROUND_CHANGED"
-                    putExtra("package_name", packageName)
+                    putExtra("package_name", pkg)
                 }
                 try {
                     startService(intent)
-                    lastForwardedPackage = packageName
+                    lastForwardedPackage = pkg
                 } catch (e: Exception) {
                     // Fail-safe for background limitations (though accessibility services are immune)
                 }

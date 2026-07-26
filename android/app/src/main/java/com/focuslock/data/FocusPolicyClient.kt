@@ -408,6 +408,16 @@ object FocusPolicyClient {
         Tasks.await(usageRef.set(nested, SetOptions.merge()))
     }
 
+    /** Absolute totals for the day. Idempotent — a retried or duplicated write is a no-op. */
+    fun setReelCounts(date: String, totals: Map<String, Int>) {
+        if (totals.isEmpty()) return
+        Tasks.await(
+            db.collection("users").document(userId)
+                .collection("usage_days").document(date)
+                .set(mapOf("reelCounts" to totals), SetOptions.merge())
+        )
+    }
+
     // ── Policy read/write ─────────────────────────────────────────────────────
 
     data class PolicyData(

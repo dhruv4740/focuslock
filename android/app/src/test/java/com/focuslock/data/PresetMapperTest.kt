@@ -39,10 +39,17 @@ class PresetMapperTest {
     }
 
     @Test
-    fun `builtin chill keeps existing reel limits and soft blocking`() {
+    fun `builtin chill sets a 60-per-day reel quota and soft blocking`() {
         val limits = mapOf("instagram_reels" to 10)
         val bundle = PresetMapper.builtInBundle(PresetMapper.BUILTIN_CHILL, targets, 45, limits)!!
-        assertEquals(limits, bundle["reelDailyLimit"])
+        assertEquals(
+            mapOf("instagram_reels" to 60, "youtube_shorts" to 60),
+            bundle["reelDailyLimit"]
+        )
+        assertEquals(
+            mapOf("instagram_reels" to "quota", "youtube_shorts" to "quota"),
+            bundle["blockedSurfaces"]
+        )
         assertEquals(false, bundle["hardBlockAfterLimit"])
         assertFalse(bundle.containsKey("dailyLimitMinutes"))
     }

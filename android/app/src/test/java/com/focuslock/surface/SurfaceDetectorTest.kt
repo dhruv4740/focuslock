@@ -177,10 +177,11 @@ class SurfaceDetectorTest {
     }
 
     @Test
-    fun `SurfaceMode fromWire maps wire values`() {
+    fun `fromWire maps all four modes and defaults unknown to off`() {
+        assertEquals(SurfaceMode.OFF, SurfaceMode.fromWire("off"))
+        assertEquals(SurfaceMode.QUOTA, SurfaceMode.fromWire("quota"))
         assertEquals(SurfaceMode.BLOCK, SurfaceMode.fromWire("block"))
         assertEquals(SurfaceMode.ONE_AT_A_TIME, SurfaceMode.fromWire("one_at_a_time"))
-        assertEquals(SurfaceMode.OFF, SurfaceMode.fromWire("off"))
         assertEquals(SurfaceMode.OFF, SurfaceMode.fromWire(null))
         assertEquals(SurfaceMode.OFF, SurfaceMode.fromWire("garbage"))
     }
@@ -193,6 +194,88 @@ class SurfaceDetectorTest {
         assertSame(BlockableSurface.YOUTUBE_SHORTS, BlockableSurface.byPackage("app.morphe.android.youtube"))
         assertSame(BlockableSurface.YOUTUBE_SHORTS, BlockableSurface.byPackage("app.revanced.android.youtube"))
         assertNull(BlockableSurface.byPackage("com.whatsapp"))
+    }
+
+    @Test
+    fun `the heuristic resolves a renamed youtube package`() {
+        assertSame(BlockableSurface.YOUTUBE_SHORTS, BlockableSurface.byPackage("app.morphe.android.youtube"))
+        assertSame(BlockableSurface.YOUTUBE_SHORTS, BlockableSurface.byPackage("app.morphe.youtube"))
+        assertSame(BlockableSurface.YOUTUBE_SHORTS, BlockableSurface.byPackage("com.morphe.android.youtube"))
+    }
+
+    @Test
+    fun `the heuristic rejects youtube music kids and creator siblings`() {
+        assertNull(BlockableSurface.byPackage("com.google.android.apps.youtube.music"))
+        assertNull(BlockableSurface.byPackage("com.google.android.apps.youtube.kids"))
+        assertNull(BlockableSurface.byPackage("com.google.android.apps.youtube.creator"))
+        assertNull(BlockableSurface.byPackage("com.google.android.youtube.studio"))
+        assertNull(BlockableSurface.byPackage("com.google.android.youtube.tv"))
+        assertNull(BlockableSurface.byPackage("com.google.android.youtube.vr"))
+    }
+
+    @Test
+    fun `the heuristic rejects unrelated packages`() {
+        assertNull(BlockableSurface.byPackage("com.whatsapp"))
+    }
+
+    @Test
+    fun `an explicit alias resolves a package the heuristic misses`() {
+        // A package with no vendor token at all — only reachable via a user-declared alias.
+        assertNull(BlockableSurface.byPackage("com.example.rebrandedapp"))
+        val alias = mapOf("com.example.rebrandedapp" to BlockableSurface.INSTAGRAM_REELS)
+        assertSame(
+            BlockableSurface.INSTAGRAM_REELS,
+            BlockableSurface.byPackage("com.example.rebrandedapp", alias)
+        )
+    }
+
+    @Test
+    fun `quota mode allows and does not block`() {
+        val t = tracker()
+        // onViewerVisible explicitly treats QUOTA like OFF (see production comment).
+        assertEquals(SurfaceDecision.ALLOW, t.onViewerVisible(reels, SurfaceMode.QUOTA, 0L))
+        assertEquals(SurfaceDecision.ALLOW, t.onViewerVisible(reels, SurfaceMode.QUOTA, 100L))
+    }
+
+    @Test
+    fun `quota mode allows pager scrolls and does not adopt a session`() {
+        val t = tracker()
+        // No open session: must not fall through to the missed-entry branch and
+        // adopt a one-at-a-time session (which would GRANT_ENTRY then PRESS_BACK
+        // on the next swipe, making QUOTA behave like ONE_AT_A_TIME).
+        assertEquals(
+            SurfaceDecision.ALLOW,
+            t.onPagerScrolled(reels, SurfaceMode.QUOTA, fromIndex = 0, toIndex = 1, scrollDeltaY = 0, nowMs = 0L)
+        )
+        // With an open session for this surface, scrolling under QUOTA still allows.
+        t.onViewerVisible(reels, SurfaceMode.ONE_AT_A_TIME, 100L)
+        assertEquals(
+            SurfaceDecision.ALLOW,
+            t.onPagerScrolled(reels, SurfaceMode.QUOTA, fromIndex = 0, toIndex = 1, scrollDeltaY = 0, nowMs = 110L)
+        )
+    }
+
+    @Test
+    fun `an open instagram session does not suppress blocking youtube shorts`() {
+        val t = tracker()
+        val shorts = BlockableSurface.YOUTUBE_SHORTS
+        // Instagram session open in ONE_AT_A_TIME.
+        assertEquals(SurfaceDecision.GRANT_ENTRY, t.onViewerVisible(reels, SurfaceMode.ONE_AT_A_TIME, 0L))
+        // YouTube Shorts detected in BLOCK mode must still be blocked, not silently
+        // allowed because a session for a *different* surface is open.
+        assertEquals(SurfaceDecision.PRESS_BACK, t.onViewerVisible(shorts, SurfaceMode.BLOCK, 10L))
+    }
+
+    @Test
+    fun `the shipping debounce and cooldown values are exercised`() {
+        // Production config: backDebounceMs = 1500, postBackCooldownMs = 1500 — both
+        // expire at the same instant, unlike every other test's 1500/3000 split.
+        val t = SurfaceSessionTracker()
+        assertEquals(SurfaceDecision.PRESS_BACK, t.onViewerVisible(reels, SurfaceMode.BLOCK, 0L))
+        // Still inside both windows.
+        assertEquals(SurfaceDecision.ALLOW, t.onViewerVisible(reels, SurfaceMode.BLOCK, 1000L))
+        // Past both the debounce and the cooldown (which expire together at 1500ms).
+        assertEquals(SurfaceDecision.PRESS_BACK, t.onViewerVisible(reels, SurfaceMode.BLOCK, 1600L))
     }
 
     @Test

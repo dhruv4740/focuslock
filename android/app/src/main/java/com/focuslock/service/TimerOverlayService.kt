@@ -19,6 +19,7 @@ import android.view.WindowManager
 import android.widget.TextView
 import com.focuslock.surface.BlockableSurface
 import com.focuslock.surface.SurfaceBlocker
+import com.focuslock.surface.SurfaceMode
 import kotlin.math.abs
 
 class TimerOverlayService : Service() {
@@ -195,12 +196,16 @@ class TimerOverlayService : Service() {
             "${totalToday}m today"
         }
 
-        val reelText = currentTarget?.let { BlockableSurface.byPackage(it) }
+        val reelText = currentTarget?.let { BlockableSurface.byPackage(it, SurfaceBlocker.learnedAliases()) }
             ?.let { SurfaceBlocker.statusFor(it) }
             ?.takeIf { it.enabled }
             ?.let { status ->
-                val counts = if (status.limit > 0) "${status.count}/${status.limit}" else "${status.count} reels"
-                val suffix = if (status.blocked) " ⛔" else ""
+                val counts = if (status.mode == SurfaceMode.OFF || status.mode == SurfaceMode.BLOCK || status.limit <= 0) {
+                    "${status.count} reels"
+                } else {
+                    "${status.count}/${status.limit}"
+                }
+                val suffix = if (status.mode == SurfaceMode.BLOCK || status.blocked) " ⛔" else ""
                 "$counts$suffix"
             }
 

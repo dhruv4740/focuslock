@@ -32,6 +32,7 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.focuslock.receiver.PolicyDeviceAdminReceiver
 import com.focuslock.security.EnforcementChecks
 import com.focuslock.service.UsageMonitorService
+import com.focuslock.surface.BlockableSurface
 import com.focuslock.surface.SurfaceBlocker
 import java.time.LocalDate
 
@@ -63,13 +64,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var editReelLimitYoutube: EditText
     private lateinit var txtReelCounts: TextView
     private lateinit var txtReelsPolicySaved: TextView
+    private lateinit var txtReelDetection: TextView
 
     // Blocked-surfaces spinner options: wire value paired with its display label,
     // so reordering the list can never silently corrupt the saved mode.
     private val surfaceModeOptions = listOf(
-        "off" to "Off",
-        "block" to "Block entirely",
-        "one_at_a_time" to "One at a time"
+        "off" to "Off — just count",
+        "quota" to "Count, block after limit",
+        "one_at_a_time" to "One at a time",
+        "block" to "Block entirely"
     )
 
     private fun spinnerWireValue(spinner: Spinner): String =
@@ -120,6 +123,7 @@ class MainActivity : AppCompatActivity() {
         editReelLimitYoutube = findViewById(R.id.editReelLimitYoutube)
         txtReelCounts = findViewById(R.id.txtReelCounts)
         txtReelsPolicySaved = findViewById(R.id.txtReelsPolicySaved)
+        txtReelDetection = findViewById(R.id.txtReelDetection)
         layoutWeeklyChart = findViewById(R.id.layoutWeeklyChart)
 
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -206,6 +210,7 @@ class MainActivity : AppCompatActivity() {
 
         refreshProtectionStatus()
         refreshDashboardData()
+        refreshReelDetection()
 
         val versionName = try {
             packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
@@ -423,6 +428,8 @@ class MainActivity : AppCompatActivity() {
         surfaceModeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinnerInstagramReels.adapter = surfaceModeAdapter
         spinnerYoutubeShorts.adapter = surfaceModeAdapter
+        setupReelLimitEnablement(spinnerInstagramReels, editReelLimitInstagram)
+        setupReelLimitEnablement(spinnerYoutubeShorts, editReelLimitYoutube)
 
         // Add target app
         findViewById<Button>(R.id.btnAddTargetApp).setOnClickListener {
@@ -476,6 +483,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         loadPolicyIntoEditor()
+    }
+
+    // "off" only counts — the daily limit field is meaningless there, so grey
+    // it out to avoid implying it does something in that mode.
+    private fun setupReelLimitEnablement(spinner: Spinner, limitField: EditText) {
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                limitField.isEnabled = surfaceModeOptions[position].first != "off"
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
     }
 
     private fun saveBlockingRules(btn: View, confirmationView: TextView) {
@@ -815,6 +833,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         refreshProtectionStatus()
         refreshDashboardData()
+        refreshReelDetection()
         val switchDeviceAdmin = findViewById<SwitchCompat>(R.id.switchDeviceAdmin)
         val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val adminComponent = ComponentName(this, PolicyDeviceAdminReceiver::class.java)
@@ -837,6 +856,27 @@ class MainActivity : AppCompatActivity() {
             append("\nNotifications: "); append(if (notificationGranted) "✅ ACTIVE" else "❌ DISRUPTED")
             if (!statusObj.allCriticalGranted) append("\n\n⚠️ Protection degraded. Grant missing permissions.")
             else append("\n\n🛡️ FocusLock Active protection enabled.")
+        }
+    }
+
+    // Read-only diagnostics: helps the user find their modded YouTube client's
+    // real package name once detection has learned it (see learnedAliases()).
+    private fun refreshReelDetection() {
+        val statusLines = BlockableSurface.entries.joinToString("\n") { surface ->
+            val status = SurfaceBlocker.statusFor(surface)
+            "${surface.wireKey}: mode=${status.mode.wire} count=${status.count} limit=${status.limit} blocked=${status.blocked}"
+        }
+        val aliases = SurfaceBlocker.learnedAliases()
+        val aliasLines = if (aliases.isEmpty()) {
+            "none yet"
+        } else {
+            aliases.entries.joinToString("\n") { (pkg, surface) -> "$pkg -> ${surface.wireKey}" }
+        }
+        txtReelDetection.text = buildString {
+            append(statusLines)
+            append("\n\nLearned aliases:\n")
+            append(aliasLines)
+            append("\n\nOpen Reels/Shorts and swipe once, then return here.")
         }
     }
 

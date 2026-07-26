@@ -66,13 +66,16 @@ object PresetMapper {
         val allSurfacesTo = { mode: String ->
             mapOf("instagram_reels" to mode, "youtube_shorts" to mode)
         }
+        val fixedReelLimit = { limit: Int ->
+            mapOf("instagram_reels" to limit, "youtube_shorts" to limit)
+        }
         return when (id) {
             BUILTIN_CHILL -> mapOf(
                 "name" to "Chill",
                 "appModes" to currentTargets.associateWith { AppMode.FRICTION_ONLY.wire },
                 "hardBlockAfterLimit" to false,
-                "blockedSurfaces" to allSurfacesTo("one_at_a_time"),
-                "reelDailyLimit" to reelDailyLimit,
+                "blockedSurfaces" to allSurfacesTo("quota"),
+                "reelDailyLimit" to fixedReelLimit(60),
                 "sessionMaxMinutes" to 20,
                 "sessionBreakMinutes" to 1,
                 "frictionSteps" to mapOf("enable_breathing" to true, "enable_delay" to true)
@@ -82,8 +85,8 @@ object PresetMapper {
                 "appModes" to currentTargets.associateWith { AppMode.LIMIT.wire },
                 "dailyLimitMinutes" to (if (dailyLimitMinutes > 0) dailyLimitMinutes else 60),
                 "hardBlockAfterLimit" to false,
-                "blockedSurfaces" to allSurfacesTo("one_at_a_time"),
-                "reelDailyLimit" to reelDailyLimit,
+                "blockedSurfaces" to allSurfacesTo("quota"),
+                "reelDailyLimit" to fixedReelLimit(25),
                 "sessionMaxMinutes" to 15,
                 "sessionBreakMinutes" to 2,
                 "frictionSteps" to mapOf(

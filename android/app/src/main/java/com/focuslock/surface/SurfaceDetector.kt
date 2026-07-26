@@ -1,13 +1,33 @@
 package com.focuslock.surface
 
-/** Per-surface policy setting, as configured in the "Blocked Surfaces" editor. */
+/**
+ * Per-surface policy setting, as configured in the "Reels & Shorts" editor.
+ *
+ * Note this only controls *enforcement*. Reel impressions are counted in every
+ * mode including [OFF] — counting and blocking are independent pipelines (see
+ * [ReelImpressionCounter]). Before that split, the daily count was a side effect
+ * of the [ONE_AT_A_TIME] entry grant, so it froze in [BLOCK] and never ran in
+ * [OFF], and the number meant "viewer re-entries" rather than "reels watched".
+ */
 enum class SurfaceMode {
-    OFF, BLOCK, ONE_AT_A_TIME;
+    OFF, QUOTA, BLOCK, ONE_AT_A_TIME;
+
+    /** Wire value written to Firestore `blockedSurfaces`. */
+    val wire: String
+        get() = when (this) {
+            OFF -> "off"
+            QUOTA -> "quota"
+            BLOCK -> "block"
+            ONE_AT_A_TIME -> "one_at_a_time"
+        }
 
     companion object {
+        // Unknown values degrade to OFF so a doc written by a newer client never
+        // crashes or over-blocks an older one.
         fun fromWire(value: String?): SurfaceMode = when (value) {
             "block" -> BLOCK
             "one_at_a_time" -> ONE_AT_A_TIME
+            "quota" -> QUOTA
             else -> OFF
         }
     }
@@ -41,7 +61,38 @@ enum class BlockableSurface(
     );
 
     companion object {
-        fun byPackage(pkg: String): BlockableSurface? = entries.firstOrNull { pkg in it.packageNames }
+        // Substring tokens for the heuristic fallback. Modded clients (Morphe,
+        // ReVanced, RVX, and anything a user renames in ReVanced Manager) keep the
+        // vendor name in their applicationId but the exact string is unknowable, so
+        // an exact-match list can never be complete — and a miss is silent.
+        private val heuristicTokens: Map<String, BlockableSurface> = mapOf(
+            "youtube" to YOUTUBE_SHORTS,
+            "instagram" to INSTAGRAM_REELS
+        )
+
+        // Sibling apps that share the vendor token but have no reel/short viewer.
+        // Excluding them only saves wasted probe work — a false match would still
+        // be harmless, because the view-ID and fullscreen-bounds gates have to pass
+        // before anything is counted or blocked.
+        private val excludedTokens = listOf("music", "kids", "creator", "studio", ".tv", "vr")
+
+        /**
+         * Resolves a runtime package to the surface it hosts.
+         *
+         * Three layers, cheapest first: the known-package set, a vendor-token
+         * heuristic that survives arbitrary mod renames, then [extra] — packages the
+         * user declared by hand in Settings for anything the heuristic misses.
+         */
+        fun byPackage(
+            pkg: String,
+            extra: Map<String, BlockableSurface> = emptyMap()
+        ): BlockableSurface? {
+            entries.firstOrNull { pkg in it.packageNames }?.let { return it }
+            extra[pkg]?.let { return it }
+            val lower = pkg.lowercase()
+            if (excludedTokens.any { it in lower }) return null
+            return heuristicTokens.entries.firstOrNull { it.key in lower }?.value
+        }
     }
 }
 
@@ -96,16 +147,14 @@ object SurfaceMarkers {
         return names.flatMap { name -> prefixes.map { prefix -> "$prefix:id/$name" } }
     }
 
-    // Best-effort ad markers for the reel counter. Neither platform exposes a real
-    // "this is an ad" flag over the accessibility API — this is a text-label
-    // heuristic only. Deliberately conservative (no bare "Ad", which would
-    // substring-match ordinary words like "Adam"): it under-detects ads rather
-    // than risking any behavioral change to real content. Counting is the only
-    // thing this gates — it never affects whether a reel is shown or blocked.
-    val adKeywords: Map<BlockableSurface, Set<String>> = mapOf(
-        BlockableSurface.INSTAGRAM_REELS to setOf("Sponsored"),
-        BlockableSurface.YOUTUBE_SHORTS to setOf("Sponsored")
-    )
+    // There was an ad-exclusion heuristic here that searched the whole window tree for
+    // "Sponsored" and skipped the count on a hit. It was removed, not disabled: the
+    // search is a case-insensitive *substring* match over every node, so a sponsored
+    // label in a suggested-accounts row or a visible comment silently suppressed the
+    // count for a genuine organic reel. Its failure mode was under-counting, which is
+    // the exact bug the counter rewrite exists to fix, and now that counts gate quota
+    // enforcement a false match also hands out free reels. If ad exclusion is wanted
+    // again, scope it to the settled pager page and require an exact text match.
 }
 
 // A feed-embedded reel/short (Instagram home feed, YouTube home feed) can expose the
@@ -123,6 +172,148 @@ internal fun isViewerSizedBounds(
     windowW > 0 && windowH > 0 &&
         nodeH >= windowH * minHeightFraction &&
         nodeW >= windowW * minWidthFraction
+
+/**
+ * Counts distinct reel/short impressions, independently of [SurfaceMode] and of the
+ * enforcement state machine. Runs in every mode, including [SurfaceMode.OFF].
+ *
+ * This exists because counting used to be a side effect of [SurfaceSessionTracker]'s
+ * one-at-a-time entry grant, which made the daily total wrong in three ways: it never
+ * incremented in BLOCK or OFF, it counted one reel per viewer session rather than per
+ * reel, and — the dominant bug — the tracker's post-Back cooldown swallowed the grant
+ * whenever the user re-entered the viewer within ~1.5s. Fast scrolling is exactly that
+ * pattern, so heavy use undercounted the most.
+ *
+ * The fix is to not depend on enforcement timing at all. A session is closed by two
+ * explicit signals we own — [onSurfaceLeft] (left the app, or we just issued a Back
+ * press) — plus a generous [sessionGapMs] backstop for incidental probe misses. That
+ * makes a re-entry after a Back press count reliably no matter how fast it happens,
+ * while a comments sheet briefly stealing the active window still does not recount.
+ *
+ * Pure: no Android dependencies, all timing passed in via `nowMs`.
+ */
+class ReelImpressionCounter(
+    private val advanceDeltaPx: Int = 900,
+    private val sessionGapMs: Long = 3000L,
+    private val maxAdvancePerEvent: Int = 10,
+    private val minAdvanceIntervalMs: Long = 250L
+) {
+    private class SurfaceState {
+        var sessionOpen = false
+        var lastIndex: Int? = null
+        /** Latched once the app is known to emit usable indices, so the delta
+         *  fallback can never double-count the same advance. */
+        var sawIndexEvents = false
+        var accumulatedDeltaY = 0
+        var lastSeenAtMs = 0L
+        var lastAdvanceAtMs = 0L
+    }
+
+    private val states = mutableMapOf<BlockableSurface, SurfaceState>()
+
+    private fun stateOf(surface: BlockableSurface) = states.getOrPut(surface) { SurfaceState() }
+
+    /** True when the gap since the last event is long enough to call the session over. */
+    private fun SurfaceState.stale(nowMs: Long) = nowMs - lastSeenAtMs > sessionGapMs
+
+    private fun SurfaceState.openSession(nowMs: Long, index: Int?) {
+        sessionOpen = true
+        lastIndex = index
+        sawIndexEvents = index != null
+        accumulatedDeltaY = 0
+        lastSeenAtMs = nowMs
+        lastAdvanceAtMs = nowMs
+    }
+
+    /**
+     * The viewer is on screen. Returns 1 when this opens a new session (the reel the
+     * user landed on), 0 while an existing session is still running.
+     */
+    fun onViewerVisible(surface: BlockableSurface, nowMs: Long): Int {
+        val st = stateOf(surface)
+        if (st.sessionOpen && !st.stale(nowMs)) {
+            st.lastSeenAtMs = nowMs
+            return 0
+        }
+        st.openSession(nowMs, index = null)
+        return 1
+    }
+
+    /**
+     * A swipe on the reel pager. Returns how many new reels it consumed — normally 1,
+     * more for a fling that skips several items.
+     */
+    fun onPagerScrolled(
+        surface: BlockableSurface,
+        fromIndex: Int,
+        toIndex: Int,
+        scrollDeltaY: Int,
+        nowMs: Long
+    ): Int {
+        val st = stateOf(surface)
+        val settled = settledIndex(fromIndex, toIndex)
+
+        if (!st.sessionOpen || st.stale(nowMs)) {
+            // Entry event was missed (service reconnected mid-viewer, or the presence
+            // probe never fired). Adopt this scroll as the session start.
+            st.openSession(nowMs, index = settled)
+            return 1
+        }
+        st.lastSeenAtMs = nowMs
+
+        if (settled != null) {
+            st.sawIndexEvents = true
+            val previous = st.lastIndex
+            st.lastIndex = settled
+            // First settled event of the session just establishes the baseline — the
+            // reel at that index was already counted when the session opened.
+            if (previous == null) return 0
+            if (settled == previous) return 0
+            // Layout thrash can bounce the settled index A→B→A within a few ms. A real
+            // swipe never lands two reels that fast, so treat it as one view.
+            if (nowMs - st.lastAdvanceAtMs < minAdvanceIntervalMs) return 0
+            st.lastAdvanceAtMs = nowMs
+            // Clamped: a RecyclerView rebind can snap the index back to 0, which would
+            // otherwise register as a huge burst of phantom reels.
+            return kotlin.math.abs(settled - previous).coerceAtMost(maxAdvancePerEvent)
+        }
+
+        // Unsettled event. If this app has ever reported a usable settled index, the
+        // index path owns counting for the whole session — running the delta fallback
+        // alongside it would count every advance twice.
+        if (st.sawIndexEvents) return 0
+
+        // No index signal at all — fall back to scroll distance. A full swipe to the
+        // next reel covers roughly one screen height; carry the remainder so a run of
+        // partial scroll events still adds up to exactly one reel.
+        st.accumulatedDeltaY += kotlin.math.abs(scrollDeltaY)
+        val advances = st.accumulatedDeltaY / advanceDeltaPx
+        st.accumulatedDeltaY -= advances * advanceDeltaPx
+        if (advances > 0) st.lastAdvanceAtMs = nowMs
+        return advances.coerceAtMost(maxAdvancePerEvent)
+    }
+
+    /**
+     * The pager is showing exactly one reel only when the first and last visible
+     * positions agree. RecyclerView reports `fromIndex = findFirstVisibleItemPosition()`
+     * and `toIndex = findLastVisibleItemPosition()`, so mid-swipe — with two reels
+     * partially on screen — they differ. Counting on every `toIndex` change (what the
+     * old advance logic did) therefore fires repeatedly during a single swipe.
+     */
+    private fun settledIndex(fromIndex: Int, toIndex: Int): Int? =
+        if (fromIndex >= 0 && fromIndex == toIndex) fromIndex else null
+
+    /**
+     * The user left this surface for real — switched app, or we just issued a Back
+     * press to kick them out. The next sighting is a genuinely new reel and counts,
+     * with no dependence on how quickly they come back.
+     */
+    fun onSurfaceLeft(surface: BlockableSurface) {
+        states[surface]?.sessionOpen = false
+    }
+
+    fun reset() = states.clear()
+}
 
 enum class SurfaceDecision { ALLOW, PRESS_BACK, GRANT_ENTRY }
 
@@ -176,12 +367,19 @@ class SurfaceSessionTracker(
     }
 
     fun onViewerVisible(surface: BlockableSurface, mode: SurfaceMode, nowMs: Long): SurfaceDecision {
-        if (mode == SurfaceMode.OFF) {
+        // QUOTA enforces nothing on its own — SurfaceBlocker.effectiveMode upgrades it
+        // to BLOCK once the daily reel limit is reached, so the tracker only ever sees
+        // QUOTA while the user is still under quota.
+        if (mode == SurfaceMode.OFF || mode == SurfaceMode.QUOTA) {
             state = State.Idle
             return SurfaceDecision.ALLOW
         }
         if (stillInCooldown(nowMs)) return SurfaceDecision.ALLOW
-        if (state is State.InViewer) return SurfaceDecision.ALLOW
+        // Only a session for *this* surface suppresses re-arming. Without the surface
+        // check, an Instagram session left open (app-switched via Recents, which is
+        // filtered as a transient system package) meant YouTube Shorts was never
+        // blocked — onPagerScrolled already compared surfaces, this path did not.
+        (state as? State.InViewer)?.let { if (it.surface == surface) return SurfaceDecision.ALLOW }
 
         return when (mode) {
             SurfaceMode.BLOCK -> pressBack(nowMs)
@@ -189,7 +387,7 @@ class SurfaceSessionTracker(
                 state = State.InViewer(surface, entryIndex = null, accumulatedDeltaY = 0)
                 SurfaceDecision.GRANT_ENTRY
             }
-            SurfaceMode.OFF -> SurfaceDecision.ALLOW
+            SurfaceMode.OFF, SurfaceMode.QUOTA -> SurfaceDecision.ALLOW
         }
     }
 
@@ -201,7 +399,12 @@ class SurfaceSessionTracker(
         scrollDeltaY: Int,
         nowMs: Long
     ): SurfaceDecision {
-        if (mode == SurfaceMode.OFF) return SurfaceDecision.ALLOW
+        // QUOTA must be inert here for the same reason it is in onViewerVisible: while
+        // the user is under quota it enforces nothing, and SurfaceBlocker.effectiveMode
+        // upgrades it to BLOCK once the limit is hit. Without this the scroll would fall
+        // through to the missed-entry branch below, adopt a one-at-a-time session, and
+        // Back the user out on their next swipe — making QUOTA behave like ONE_AT_A_TIME.
+        if (mode == SurfaceMode.OFF || mode == SurfaceMode.QUOTA) return SurfaceDecision.ALLOW
         if (stillInCooldown(nowMs)) return SurfaceDecision.ALLOW
 
         val current = state as? State.InViewer
@@ -260,6 +463,16 @@ class SurfaceSessionTracker(
         }
         state = State.Idle
     }
+
+    /**
+     * The surface this tracker currently holds a viewer session for, or null when
+     * idle or cooling down. Exposed so a policy refresh can reset the tracker only
+     * when the mode of the surface actually being tracked changed — resetting
+     * unconditionally on every 15-minute refresh wiped live session state and made
+     * the next probe issue a spurious re-entry.
+     */
+    val activeSurface: BlockableSurface?
+        get() = (state as? State.InViewer)?.surface
 
     fun reset() {
         state = State.Idle
