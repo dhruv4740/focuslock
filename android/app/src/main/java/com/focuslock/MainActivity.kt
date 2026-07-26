@@ -94,6 +94,12 @@ class MainActivity : AppCompatActivity() {
 
     private val PREFS_NAME = "FocusLockPrefs"
 
+    /** Applies a background result on the UI thread, unless this Activity is already gone. */
+    private fun postToUi(block: () -> Unit) {
+        if (isFinishing || isDestroyed) return
+        runOnUiThread { if (!isFinishing && !isDestroyed) block() }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -303,14 +309,14 @@ class MainActivity : AppCompatActivity() {
                         startService(Intent(this, UsageMonitorService::class.java)
                             .setAction(UsageMonitorService.ACTION_POLICY_UPDATED))
 
-                        runOnUiThread {
+                        postToUi {
                             Toast.makeText(this, "\"$name\" mode applied", Toast.LENGTH_SHORT).show()
                             currentPolicy = null
                             loadPolicyIntoEditor()
                             syncFrictionSwitchStates()
                         }
                     } catch (e: Exception) {
-                        runOnUiThread {
+                        postToUi {
                             Toast.makeText(this, "Failed to apply mode: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -358,7 +364,7 @@ class MainActivity : AppCompatActivity() {
             Thread {
                 try {
                     val result = FocusPolicyClient.startFocusSession(minutes)
-                    runOnUiThread {
+                    postToUi {
                         focusSessionText.text = if (result.active)
                             "Focus session active until ${result.endsAt}"
                         else
@@ -366,7 +372,7 @@ class MainActivity : AppCompatActivity() {
                         btn.isEnabled = true
                     }
                 } catch (e: Exception) {
-                    runOnUiThread {
+                    postToUi {
                         focusSessionText.text = "Focus session start failed: ${e.message}"
                         btn.isEnabled = true
                     }
@@ -379,12 +385,12 @@ class MainActivity : AppCompatActivity() {
             Thread {
                 try {
                     FocusPolicyClient.stopFocusSession()
-                    runOnUiThread {
+                    postToUi {
                         focusSessionText.text = "Focus session inactive"
                         btn.isEnabled = true
                     }
                 } catch (e: Exception) {
-                    runOnUiThread {
+                    postToUi {
                         focusSessionText.text = "Focus session stop failed: ${e.message}"
                         btn.isEnabled = true
                     }
@@ -403,14 +409,14 @@ class MainActivity : AppCompatActivity() {
             Thread {
                 try {
                     FocusPolicyClient.addTodo(text)
-                    runOnUiThread {
+                    postToUi {
                         editNewTodo.setText("")
                         Toast.makeText(this, "Task added!", Toast.LENGTH_SHORT).show()
                         loadTodos()
                         btn.isEnabled = true
                     }
                 } catch (e: Exception) {
-                    runOnUiThread {
+                    postToUi {
                         Toast.makeText(this, "Failed to add task: ${e.message}", Toast.LENGTH_SHORT).show()
                         btn.isEnabled = true
                     }
@@ -571,13 +577,13 @@ class MainActivity : AppCompatActivity() {
                 // its 15-minute policy refresh throttle.
                 startService(Intent(this, UsageMonitorService::class.java)
                     .setAction(UsageMonitorService.ACTION_POLICY_UPDATED))
-                runOnUiThread {
+                postToUi {
                     confirmationView.visibility = View.VISIBLE
                     confirmationView.postDelayed({ confirmationView.visibility = View.GONE }, 2000)
                     btn.isEnabled = true
                 }
             } catch (e: Exception) {
-                runOnUiThread {
+                postToUi {
                     Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
                     btn.isEnabled = true
                 }
@@ -589,7 +595,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 val policy = FocusPolicyClient.getPolicy()
-                runOnUiThread {
+                postToUi {
                     currentPolicy = policy
                     editDailyLimit.setText(if (policy.dailyLimitMinutes > 0) policy.dailyLimitMinutes.toString() else "")
                     editExtensionMins.setText(policy.extensionMinutes.toString())
@@ -691,9 +697,10 @@ class MainActivity : AppCompatActivity() {
             val del = Button(this).apply {
                 text = "✕"
                 textSize = 10f
+                contentDescription = "Remove $pkg"
                 setTextColor(getColor(R.color.color_danger))
                 background = getDrawable(R.drawable.button_secondary)
-                val size = (32 * resources.displayMetrics.density).toInt()
+                val size = resources.getDimensionPixelSize(R.dimen.min_touch_target)
                 layoutParams = LinearLayout.LayoutParams(size, size).apply { marginStart = 8 }
                 setOnClickListener {
                     currentPolicy = currentPolicy?.let { p ->
@@ -745,9 +752,10 @@ class MainActivity : AppCompatActivity() {
             val del = Button(this).apply {
                 text = "✕"
                 textSize = 10f
+                contentDescription = "Remove block window ${w["start"]} to ${w["end"]}"
                 setTextColor(getColor(R.color.color_danger))
                 background = getDrawable(R.drawable.button_secondary)
-                val size = (32 * resources.displayMetrics.density).toInt()
+                val size = resources.getDimensionPixelSize(R.dimen.min_touch_target)
                 layoutParams = LinearLayout.LayoutParams(size, size).apply { marginStart = 8 }
                 setOnClickListener {
                     currentPolicy = currentPolicy?.copy(
@@ -888,7 +896,7 @@ class MainActivity : AppCompatActivity() {
                 val stats = FocusPolicyClient.getStats(dateStr)
                 val evaluateResult = FocusPolicyClient.evaluate(dateStr)
 
-                runOnUiThread {
+                postToUi {
                     if (focus.active) {
                         focusSessionText.text = "Focus session active until ${focus.endsAt}"
                         focusSessionText.setTextColor(getColor(R.color.color_accent))
@@ -924,7 +932,7 @@ class MainActivity : AppCompatActivity() {
                     txtReelCounts.text = "Today: $igReels Reels · $ytShorts Shorts"
                 }
             } catch (e: Exception) {
-                runOnUiThread {
+                postToUi {
                     todayMinutesText.text = "-- minutes"
                     todayOpensText.text = "Server offline or unreachable"
                 }
@@ -942,7 +950,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val week = FocusPolicyClient.getUsageWeek()
                 val maxMinutes = week.maxOfOrNull { it.usedMinutes }?.coerceAtLeast(1.0) ?: 1.0
-                runOnUiThread {
+                postToUi {
                     layoutWeeklyChart.removeAllViews()
                     for (day in week) {
                         val row = LinearLayout(this).apply {
@@ -987,7 +995,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             } catch (e: Exception) {
-                runOnUiThread {
+                postToUi {
                     layoutWeeklyChart.removeAllViews()
                     layoutWeeklyChart.addView(TextView(this).apply {
                         text = "Could not load weekly data"
@@ -1005,7 +1013,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 val todos = FocusPolicyClient.getTodos()
-                runOnUiThread {
+                postToUi {
                     layoutTodoList.removeAllViews()
                     if (todos.isEmpty()) {
                         layoutTodoList.addView(TextView(this).apply {
@@ -1014,7 +1022,7 @@ class MainActivity : AppCompatActivity() {
                             textSize = 13f
                             setPadding(0, 10, 0, 10)
                         })
-                        return@runOnUiThread
+                        return@postToUi
                     }
 
                     for (item in todos) {
@@ -1038,7 +1046,7 @@ class MainActivity : AppCompatActivity() {
                                     try {
                                         FocusPolicyClient.toggleTodo(item.id, isChecked)
                                     } catch (e: Exception) {
-                                        runOnUiThread {
+                                        postToUi {
                                             Toast.makeText(this@MainActivity, "Failed to update task", Toast.LENGTH_SHORT).show()
                                         }
                                     }
@@ -1049,18 +1057,19 @@ class MainActivity : AppCompatActivity() {
                         val btnDel = Button(this).apply {
                             text = "✕"
                             textSize = 10f
+                            contentDescription = "Remove task ${item.text}"
                             setTextColor(getColor(R.color.color_danger))
                             background = getDrawable(R.drawable.button_secondary)
-                            val size = (32 * resources.displayMetrics.density).toInt()
+                            val size = resources.getDimensionPixelSize(R.dimen.min_touch_target)
                             layoutParams = LinearLayout.LayoutParams(size, size).apply { marginStart = 8 }
                             setOnClickListener {
                                 isEnabled = false
                                 Thread {
                                     try {
                                         FocusPolicyClient.deleteTodo(item.id)
-                                        runOnUiThread { loadTodos() }
+                                        postToUi { loadTodos() }
                                     } catch (e: Exception) {
-                                        runOnUiThread {
+                                        postToUi {
                                             Toast.makeText(this@MainActivity, "Failed to delete task", Toast.LENGTH_SHORT).show()
                                             isEnabled = true
                                         }
@@ -1075,7 +1084,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             } catch (e: Exception) {
-                runOnUiThread {
+                postToUi {
                     layoutTodoList.removeAllViews()
                     layoutTodoList.addView(TextView(this).apply {
                         text = "Cannot load task checklist (server offline)"

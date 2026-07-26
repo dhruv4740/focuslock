@@ -8,6 +8,7 @@ import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
+import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.SetOptions
 import org.json.JSONArray
@@ -494,16 +495,30 @@ object FocusPolicyClient {
     fun getUsageWeek(): List<DayUsage> {
         val today = java.time.LocalDate.now()
         val dayNames = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
-        return (6 downTo 0).map { daysAgo ->
-            val date = today.minusDays(daysAgo.toLong())
+        val dates = (6 downTo 0).map { daysAgo -> today.minusDays(daysAgo.toLong()) }
+        val dateStrs = dates.map { it.toString() }
+
+        // Single whereIn query instead of 7 sequential document reads. whereIn
+        // supports up to 10 values, so 7 dates is well within range. Missing
+        // days simply don't come back in the snapshot — zero-fill them below.
+        val snap = Tasks.await(
+            db.collection("users").document(userId)
+                .collection("usage_days")
+                .whereIn(FieldPath.documentId(), dateStrs)
+                .get()
+        )
+        val usedMinutesByDate = snap.documents.associate { doc ->
+            // getDouble, not `as? Double`: Firestore hands back a Long for any value
+            // written as an integer, and the cast would silently degrade that to 0.0.
+            // The Windows agent writes these documents too, so the numeric type is
+            // not fully under this client's control.
+            doc.id to (doc.getDouble("usedMinutes") ?: 0.0)
+        }
+
+        return dates.map { date ->
             val dateStr = date.toString()
-            val snap = Tasks.await(
-                db.collection("users").document(userId)
-                    .collection("usage_days").document(dateStr).get()
-            )
-            val usedMinutes = snap.data?.get("usedMinutes") as? Double ?: 0.0
             // DayOfWeek value: 1=Mon..7=Sun → index 0=Sun..6=Sat via % 7
-            DayUsage(dateStr, dayNames[date.dayOfWeek.value % 7], usedMinutes)
+            DayUsage(dateStr, dayNames[date.dayOfWeek.value % 7], usedMinutesByDate[dateStr] ?: 0.0)
         }
     }
 

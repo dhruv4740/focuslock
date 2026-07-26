@@ -29,7 +29,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:layout_marginBottom="24dp">
+            android:layout_marginBottom="@dimen/space_xl">
 
             <TextView
                 android:layout_width="match_parent"
@@ -41,7 +41,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Stay Mindful • Break Habit Loops"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="@dimen/space_xs"
                 android:textAppearance="@style/TextAppearance.FocusLock.Body.Secondary"/>
 
             <TextView
@@ -49,7 +49,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
-                android:padding="4dp"
+                android:padding="@dimen/space_xs"
                 android:textAppearance="@style/TextAppearance.FocusLock.Label.Secondary"/>
         </LinearLayout>
 
@@ -59,8 +59,8 @@
             android:layout_height="wrap_content"
             android:background="@drawable/card_background"
             android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
+            android:padding="@dimen/card_padding"
+            android:layout_marginBottom="@dimen/space_lg">
 
             <TextView
                 android:layout_width="match_parent"
@@ -73,7 +73,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="0 minutes"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="@dimen/space_xs"
                 android:textAppearance="@style/TextAppearance.FocusLock.Headline"/>
 
             <TextView
@@ -81,7 +81,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="0 opens today"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="@dimen/space_sm"
                 android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
 
             <View
@@ -102,7 +102,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:layout_marginTop="12dp" />
+                android:layout_marginTop="@dimen/space_md" />
         </LinearLayout>
 
         <!-- Todo List Card -->
@@ -111,8 +111,8 @@
             android:layout_height="wrap_content"
             android:background="@drawable/card_background"
             android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
+            android:padding="@dimen/card_padding"
+            android:layout_marginBottom="@dimen/space_lg">
 
             <TextView
                 android:layout_width="match_parent"
@@ -124,7 +124,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginTop="12dp">
+                android:layout_marginTop="@dimen/space_md">
 
                 <EditText
                     android:id="@+id/editNewTodo"
@@ -133,12 +133,12 @@
                     android:layout_weight="1"
                     android:hint="Type a thing you should do..."
                     android:textColorHint="@color/text_secondary"
-                    android:padding="12dp"
+                    android:padding="@dimen/space_md"
                     android:background="@drawable/edittext_background"
                     android:maxLines="1"
                     android:imeOptions="actionDone"
                     android:inputType="textCapSentences"
-                    android:layout_marginEnd="8dp"
+                    android:layout_marginEnd="@dimen/space_sm"
                 android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                 <Button
@@ -156,7 +156,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:layout_marginTop="12dp" />
+                android:layout_marginTop="@dimen/space_md" />
         </LinearLayout>
 
         <!-- Focus Session Card -->
@@ -165,8 +165,8 @@
             android:layout_height="wrap_content"
             android:background="@drawable/card_background"
             android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
+            android:padding="@dimen/card_padding"
+            android:layout_marginBottom="@dimen/space_lg">
 
             <TextView
                 android:layout_width="match_parent"
@@ -179,7 +179,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Focus session inactive"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="@dimen/space_sm"
                 android:textAppearance="@style/TextAppearance.FocusLock.Body.Secondary"/>
 
             <LinearLayout
@@ -187,13 +187,13 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:layout_marginTop="12dp">
+                android:layout_marginTop="@dimen/space_md">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Duration (min):"
-                    android:layout_marginEnd="8dp"
+                    android:layout_marginEnd="@dimen/space_sm"
                     android:labelFor="@id/editFocusDuration"
                 android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
 
@@ -203,7 +203,7 @@
                     android:layout_height="wrap_content"
                     android:text="25"
                     android:inputType="number"
-                    android:padding="8dp"
+                    android:padding="@dimen/space_sm"
                     android:background="@drawable/edittext_background"
                     android:maxLines="1"
                 android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
@@ -213,7 +213,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginTop="8dp">
+                android:layout_marginTop="@dimen/space_sm">
 
                 <Button
                     android:id="@+id/btnStartFocus"
@@ -259,8 +259,8 @@
             android:layout_height="wrap_content"
             android:background="@drawable/card_background"
             android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
+            android:padding="@dimen/card_padding"
+            android:layout_marginBottom="@dimen/space_lg">
 
             <TextView
                 android:layout_width="match_parent"
@@ -280,7 +280,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="@dimen/space_md"
                 android:weightSum="3">
 
                 <Button
@@ -289,7 +289,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Chill"
-                    android:layout_marginEnd="4dp"
+                    android:layout_marginEnd="@dimen/space_xs"
                     android:background="@drawable/button_secondary"
                 android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
 
@@ -309,7 +309,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Strict"
-                    android:layout_marginStart="4dp"
+                    android:layout_marginStart="@dimen/space_xs"
                     android:background="@drawable/button_secondary"
                 android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
             </LinearLayout>
@@ -321,8 +321,8 @@
             android:layout_height="wrap_content"
             android:background="@drawable/card_background"
             android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
+            android:padding="@dimen/card_padding"
+            android:layout_marginBottom="@dimen/space_lg">
 
             <TextView
                 android:layout_width="match_parent"
@@ -342,7 +342,7 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:layout_marginTop="12dp">
+                android:layout_marginTop="@dimen/space_md">
 
                 <TextView
                     android:layout_width="0dp"
@@ -362,11 +362,11 @@
                     android:id="@+id/editReelLimitInstagram"
                     android:layout_width="60dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
+                    android:layout_marginStart="@dimen/space_sm"
                     android:hint="0=off"
                     android:textColorHint="@color/text_secondary"
                     android:inputType="number"
-                    android:padding="8dp"
+                    android:padding="@dimen/space_sm"
                     android:background="@drawable/edittext_background"
                     android:maxLines="1"
                     android:contentDescription="Instagram Reels daily limit"
@@ -378,7 +378,7 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:layout_marginTop="8dp">
+                android:layout_marginTop="@dimen/space_sm">
 
                 <TextView
                     android:layout_width="0dp"
@@ -398,11 +398,11 @@
                     android:id="@+id/editReelLimitYoutube"
                     android:layout_width="60dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
+                    android:layout_marginStart="@dimen/space_sm"
                     android:hint="0=off"
                     android:textColorHint="@color/text_secondary"
                     android:inputType="number"
-                    android:padding="8dp"
+                    android:padding="@dimen/space_sm"
                     android:background="@drawable/edittext_background"
                     android:maxLines="1"
                     android:contentDescription="YouTube Shorts daily limit"
@@ -413,7 +413,7 @@
                 android:id="@+id/txtReelCounts"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="@dimen/space_sm"
                 android:text="Today: 0 Reels · 0 Shorts"
                 android:textAppearance="@style/TextAppearance.FocusLock.Label.Secondary"/>
 
@@ -424,7 +424,7 @@
                 android:text="Save"
                 android:background="@drawable/button_primary"
                 android:textColor="@color/text_primary"
-                android:layout_marginTop="12dp" />
+                android:layout_marginTop="@dimen/space_md" />
 
             <TextView
                 android:id="@+id/txtReelsPolicySaved"
@@ -442,8 +442,8 @@
             android:layout_height="wrap_content"
             android:background="@drawable/card_background"
             android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
+            android:padding="@dimen/card_padding"
+            android:layout_marginBottom="@dimen/space_lg">
 
             <LinearLayout
                 android:id="@+id/rowBlockingRulesHeader"
@@ -491,7 +491,7 @@
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="12dp">
+                    android:layout_marginTop="@dimen/space_md">
 
                     <TextView
                         android:layout_width="0dp"
@@ -508,7 +508,7 @@
                         android:hint="0=off"
                         android:textColorHint="@color/text_secondary"
                         android:inputType="number"
-                        android:padding="8dp"
+                        android:padding="@dimen/space_sm"
                         android:background="@drawable/edittext_background"
                         android:maxLines="1"
                 android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
@@ -520,7 +520,7 @@
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="12dp">
+                    android:layout_marginTop="@dimen/space_md">
 
                     <TextView
                         android:layout_width="0dp"
@@ -537,7 +537,7 @@
                         android:hint="0=off"
                         android:textColorHint="@color/text_secondary"
                         android:inputType="number"
-                        android:padding="8dp"
+                        android:padding="@dimen/space_sm"
                         android:background="@drawable/edittext_background"
                         android:maxLines="1"
                         android:layout_marginEnd="6dp"
@@ -550,7 +550,7 @@
                         android:hint="2"
                         android:textColorHint="@color/text_secondary"
                         android:inputType="number"
-                        android:padding="8dp"
+                        android:padding="@dimen/space_sm"
                         android:background="@drawable/edittext_background"
                         android:maxLines="1"
                         android:contentDescription="Break duration in minutes"
@@ -561,7 +561,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="After each chunk of continuous use, all managed apps hard-lock for the break — stops home-feed doomscrolling around the reel blocker."
-                    android:layout_marginTop="4dp"
+                    android:layout_marginTop="@dimen/space_xs"
                 android:textAppearance="@style/TextAppearance.FocusLock.Caption"/>
 
                 <!-- Extension settings -->
@@ -570,7 +570,7 @@
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="8dp">
+                    android:layout_marginTop="@dimen/space_sm">
 
                     <TextView
                         android:layout_width="0dp"
@@ -587,7 +587,7 @@
                         android:hint="15"
                         android:textColorHint="@color/text_secondary"
                         android:inputType="number"
-                        android:padding="8dp"
+                        android:padding="@dimen/space_sm"
                         android:background="@drawable/edittext_background"
                         android:maxLines="1"
                 android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
@@ -598,7 +598,7 @@
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="8dp">
+                    android:layout_marginTop="@dimen/space_sm">
 
                     <TextView
                         android:layout_width="0dp"
@@ -615,7 +615,7 @@
                         android:hint="1"
                         android:textColorHint="@color/text_secondary"
                         android:inputType="number"
-                        android:padding="8dp"
+                        android:padding="@dimen/space_sm"
                         android:background="@drawable/edittext_background"
                         android:maxLines="1"
                 android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
@@ -628,14 +628,14 @@
                     android:layout_height="wrap_content"
                     android:text="Hard block after limit"
                     android:paddingVertical="8dp"
-                    android:layout_marginTop="4dp"
+                    android:layout_marginTop="@dimen/space_xs"
                 android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
                     android:background="@color/border_color"
-                    android:layout_marginVertical="12dp"
+                    android:layout_marginVertical="@dimen/space_md"
                     android:importantForAccessibility="no" />
 
                 <!-- Target apps -->
@@ -650,7 +650,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:layout_marginTop="8dp">
+                    android:layout_marginTop="@dimen/space_sm">
 
                     <EditText
                         android:id="@+id/editNewTargetApp"
@@ -662,7 +662,7 @@
                         android:padding="10dp"
                         android:background="@drawable/edittext_background"
                         android:maxLines="1"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="@dimen/space_sm"
                         android:contentDescription="Package name of app to block"
                 android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
 
@@ -680,13 +680,13 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:layout_marginTop="8dp" />
+                    android:layout_marginTop="@dimen/space_sm" />
 
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
                     android:background="@color/border_color"
-                    android:layout_marginVertical="12dp"
+                    android:layout_marginVertical="@dimen/space_md"
                     android:importantForAccessibility="no" />
 
                 <!-- Block windows -->
@@ -702,7 +702,7 @@
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="8dp">
+                    android:layout_marginTop="@dimen/space_sm">
 
                     <EditText
                         android:id="@+id/editWindowStart"
@@ -715,7 +715,7 @@
                         android:background="@drawable/edittext_background"
                         android:maxLines="1"
                         android:inputType="time"
-                        android:layout_marginEnd="4dp"
+                        android:layout_marginEnd="@dimen/space_xs"
                         android:contentDescription="Block window start time"
                 android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
 
@@ -738,7 +738,7 @@
                         android:background="@drawable/edittext_background"
                         android:maxLines="1"
                         android:inputType="time"
-                        android:layout_marginStart="4dp"
+                        android:layout_marginStart="@dimen/space_xs"
                         android:contentDescription="Block window end time"
                 android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
                 </LinearLayout>
@@ -749,7 +749,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginTop="@dimen/space_sm"
                     android:weightSum="7">
 
                     <CheckBox android:id="@+id/cbSun" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="S" android:checked="true"
@@ -774,7 +774,7 @@
                     android:layout_height="wrap_content"
                     android:text="Add Window"
                     android:background="@drawable/button_secondary"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginTop="@dimen/space_sm"
                 android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
 
                 <LinearLayout
@@ -782,7 +782,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:layout_marginTop="8dp" />
+                    android:layout_marginTop="@dimen/space_sm" />
 
                 <Button
                     android:id="@+id/btnSavePolicy"
@@ -791,7 +791,7 @@
                     android:text="Save Policy"
                     android:background="@drawable/button_primary"
                     android:textColor="@color/text_primary"
-                    android:layout_marginTop="16dp" />
+                    android:layout_marginTop="@dimen/space_lg" />
 
                 <TextView
                     android:id="@+id/txtPolicySaved"
@@ -827,8 +827,8 @@
             android:layout_height="wrap_content"
             android:background="@drawable/card_background"
             android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
+            android:padding="@dimen/card_padding"
+            android:layout_marginBottom="@dimen/space_lg">
 
             <TextView
                 android:layout_width="match_parent"
@@ -841,7 +841,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Checking status..."
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="@dimen/space_sm"
                 android:lineSpacingExtra="4dp"
                 android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
@@ -849,7 +849,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="@dimen/space_lg"
                 android:weightSum="3">
 
                 <Button
@@ -858,7 +858,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Usage"
-                    android:layout_marginEnd="4dp"
+                    android:layout_marginEnd="@dimen/space_xs"
                     android:background="@drawable/button_secondary"
                 android:textAppearance="@style/TextAppearance.FocusLock.Caption.OnSurface"/>
 
@@ -878,7 +878,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Overlay"
-                    android:layout_marginStart="4dp"
+                    android:layout_marginStart="@dimen/space_xs"
                     android:background="@drawable/button_secondary"
                 android:textAppearance="@style/TextAppearance.FocusLock.Caption.OnSurface"/>
             </LinearLayout>
@@ -916,8 +916,8 @@
             android:layout_height="wrap_content"
             android:background="@drawable/card_background"
             android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
+            android:padding="@dimen/card_padding"
+            android:layout_marginBottom="@dimen/space_lg">
 
             <LinearLayout
                 android:id="@+id/rowFrictionHeader"
@@ -966,7 +966,7 @@
                     android:layout_height="wrap_content"
                     android:text="Breathing Pause (12 seconds)"
                     android:paddingVertical="8dp"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginTop="@dimen/space_sm"
                 android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                 <androidx.appcompat.widget.SwitchCompat
@@ -1029,7 +1029,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
                     android:background="@color/border_color"
-                    android:layout_marginVertical="12dp"
+                    android:layout_marginVertical="@dimen/space_md"
                     android:importantForAccessibility="no" />
 
                 <!-- Math Difficulty Selection -->
@@ -1064,8 +1064,8 @@
             android:layout_height="wrap_content"
             android:background="@drawable/card_background"
             android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
+            android:padding="@dimen/card_padding"
+            android:layout_marginBottom="@dimen/space_lg">
 
             <TextView
                 android:layout_width="match_parent"
@@ -1085,7 +1085,7 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:layout_marginTop="12dp">
+                android:layout_marginTop="@dimen/space_md">
 
                 <EditText
                     android:id="@+id/editSyncId"
@@ -1108,7 +1108,7 @@
                     android:text="Save"
                     android:textColor="@color/text_primary"
                     android:background="@drawable/button_primary"
-                    android:layout_marginStart="8dp" />
+                    android:layout_marginStart="@dimen/space_sm" />
             </LinearLayout>
         </LinearLayout>
 
@@ -1118,8 +1118,8 @@
             android:layout_height="wrap_content"
             android:background="@drawable/card_background"
             android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
+            android:padding="@dimen/card_padding"
+            android:layout_marginBottom="@dimen/space_lg">
 
             <TextView
                 android:layout_width="match_parent"
@@ -1133,7 +1133,7 @@
                 android:layout_height="wrap_content"
                 android:text="Loading…"
                 android:fontFamily="monospace"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="@dimen/space_sm"
                 android:lineSpacingExtra="2dp"
                 android:textAppearance="@style/TextAppearance.FocusLock.Label.Secondary"/>
         </LinearLayout>
