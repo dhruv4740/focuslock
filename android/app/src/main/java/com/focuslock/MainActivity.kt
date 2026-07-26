@@ -24,8 +24,11 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import com.focuslock.data.AppMode
+import com.focuslock.data.ChangeDirection
 import com.focuslock.data.FocusPolicyClient
 import com.focuslock.data.FocusPolicyClient.PolicyData
+import com.focuslock.data.PolicyRatchet
+import com.focuslock.data.PolicySnapshot
 import com.focuslock.data.PresetMapper
 import com.focuslock.update.UpdateChecker
 import com.google.android.material.bottomnavigation.BottomNavigationView
@@ -34,6 +37,7 @@ import com.focuslock.security.EnforcementChecks
 import com.focuslock.service.UsageMonitorService
 import com.focuslock.surface.BlockableSurface
 import com.focuslock.surface.SurfaceBlocker
+import com.focuslock.surface.SurfaceMode
 import java.time.LocalDate
 
 class MainActivity : AppCompatActivity() {
@@ -100,6 +104,142 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread { if (!isFinishing && !isDestroyed) block() }
     }
 
+    private fun formatEpochMs(ms: Long): String =
+        java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ms))
+
+    // ── Ratchet save path ─────────────────────────────────────────────────────
+    //
+    // Every editor card (Blocking Rules, Reels, Presets, friction toggles) goes
+    // through the same gate: build the full effective `old`/`new` snapshot pair
+    // (identical except for the fields this card just edited), refuse outright
+    // if a loosening while locked, else PolicyRatchet.split() and write
+    // `applyNow` now / `deferred` to policy/pending. `old` is built from
+    // in-memory `currentPolicy` (already loaded), not a fresh Firestore fetch —
+    // same staleness profile the pre-ratchet code had for untouched fields, see
+    // the task report for why that's an accepted tradeoff, not an oversight.
+
+    /**
+     * @param fieldKeys restricts the Firestore write to this card's own fields —
+     *   preserves the merge-write discipline (Reels can't clobber Blocking Rules
+     *   and vice versa) even though `split.applyNow` is a full snapshot.
+     * @param afterApply runs on the background thread with the *applied* (gate-
+     *   respecting) snapshot — never the raw requested `new`, so e.g. SurfaceBlocker
+     *   is never told about a loosening before its delay has elapsed.
+     */
+    private fun saveViaRatchet(
+        btn: View,
+        confirmationView: TextView?,
+        old: PolicySnapshot,
+        new: PolicySnapshot,
+        fieldKeys: Set<String>,
+        writeLocal: Boolean = false,
+        afterApply: (PolicySnapshot) -> Unit = {}
+    ) {
+        btn.isEnabled = false
+        Thread {
+            try {
+                val guard = FocusPolicyClient.getRatchetGuard()
+                val now = System.currentTimeMillis()
+                if (PolicyRatchet.classify(old, new) == ChangeDirection.LOOSEN &&
+                    PolicyRatchet.isLocked(guard.lockedUntilMs, now)
+                ) {
+                    postToUi {
+                        Toast.makeText(
+                            this,
+                            "Locked until ${formatEpochMs(guard.lockedUntilMs!!)} — loosening refused, stricter changes still apply",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        btn.isEnabled = true
+                    }
+                    return@Thread
+                }
+
+                val split = PolicyRatchet.split(old, new)
+                val scoped = FocusPolicyClient.firestoreFieldsOf(split.applyNow).filterKeys { it in fieldKeys }
+                FocusPolicyClient.updatePolicyFields(scoped)
+                if (writeLocal) FocusPolicyClient.applyLocalFields(this, split.applyNow)
+                afterApply(split.applyNow)
+
+                var message = "Saved."
+                if (split.deferred != null) {
+                    val effectiveAt = PolicyRatchet.effectiveAtMs(now, guard.loosenDelayHours)
+                    FocusPolicyClient.writePendingChange(effectiveAt, now, split.deferred, split.deferredChanges.map { it.summary })
+                    message = "Stricter changes applied now. ${split.deferredChanges.size} change(s) that weaken your limits take effect in ${guard.loosenDelayHours}h."
+                }
+
+                startService(Intent(this, UsageMonitorService::class.java)
+                    .setAction(UsageMonitorService.ACTION_POLICY_UPDATED))
+
+                postToUi {
+                    Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                    confirmationView?.let { v ->
+                        v.visibility = View.VISIBLE
+                        v.postDelayed({ v.visibility = View.GONE }, 2000)
+                    }
+                    btn.isEnabled = true
+                    currentPolicy = null
+                    loadPolicyIntoEditor()
+                    refreshPendingBanner()
+                }
+            } catch (e: Exception) {
+                postToUi {
+                    Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    btn.isEnabled = true
+                }
+            }
+        }.start()
+    }
+
+    // ── Pending-changes banner (Rules screen) ────────────────────────────────
+
+    private fun refreshPendingBanner() {
+        Thread {
+            val pending = try {
+                FocusPolicyClient.getPendingChange()
+            } catch (e: Exception) {
+                null
+            }
+            postToUi { renderPendingBanner(pending) }
+        }.start()
+    }
+
+    private fun renderPendingBanner(pending: FocusPolicyClient.PendingChange?) {
+        val card = findViewById<View>(R.id.cardPendingChange)
+        if (pending == null) {
+            card.visibility = View.GONE
+            return
+        }
+        card.visibility = View.VISIBLE
+        findViewById<TextView>(R.id.txtPendingSummaries).text =
+            pending.summaries.joinToString("\n") { "• $it" }
+        val remainingMs = (pending.effectiveAtMs - System.currentTimeMillis()).coerceAtLeast(0)
+        val remainingH = remainingMs / 3_600_000
+        val remainingM = (remainingMs / 60_000) % 60
+        findViewById<TextView>(R.id.txtPendingCountdown).text = if (remainingMs <= 0)
+            "Due — takes effect next time the app checks in"
+        else
+            "Takes effect in ${remainingH}h ${remainingM}m (${formatEpochMs(pending.effectiveAtMs)})"
+        findViewById<Button>(R.id.btnCancelPending).setOnClickListener { btn ->
+            btn.isEnabled = false
+            Thread {
+                try {
+                    // Cancelling a pending loosening is itself a tightening — no delay of its own.
+                    FocusPolicyClient.cancelPendingChange()
+                    postToUi {
+                        Toast.makeText(this, "Pending change cancelled", Toast.LENGTH_SHORT).show()
+                        btn.isEnabled = true
+                        refreshPendingBanner()
+                    }
+                } catch (e: Exception) {
+                    postToUi {
+                        Toast.makeText(this, "Cancel failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                        btn.isEnabled = true
+                    }
+                }
+            }.start()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -142,6 +282,8 @@ class MainActivity : AppCompatActivity() {
         setupPolicyEditor()
         setupPresets()
         setupFrictionSettingsAndHelpCard(prefs)
+        setupRatchetSettings()
+        refreshPendingBanner()
 
         setupCollapsible(
             header = findViewById(R.id.rowBlockingRulesHeader),
@@ -281,39 +423,90 @@ class MainActivity : AppCompatActivity() {
 
         AlertDialog.Builder(this)
             .setTitle("Apply \"$name\" mode?")
-            .setMessage("This overwrites your per-app modes, daily limit behavior, reels settings and friction steps.")
+            .setMessage(
+                "This overwrites your per-app modes, daily limit behavior, reels settings and " +
+                "friction steps. Changes that tighten your limits apply now; any that weaken " +
+                "them wait out the loosen delay (see Settings)."
+            )
             .setPositiveButton("Apply") { _, _ ->
                 Thread {
                     try {
-                        val fields = PresetMapper.bundleToLiveFields(presetId, bundle)
-                        FocusPolicyClient.updatePolicyFields(fields)
+                        val liveFields = PresetMapper.bundleToLiveFields(presetId, bundle)
+                        val frictionKeys = listOf(
+                            "enable_breathing", "enable_delay", "enable_intention",
+                            "enable_shake", "enable_reflection", "enable_stats", "enable_math"
+                        )
+                        val stepsBundle = PresetMapper.frictionSteps(bundle)
 
-                        // Friction steps + math difficulty live in local prefs.
-                        val steps = PresetMapper.frictionSteps(bundle)
-                        if (steps.isNotEmpty()) {
-                            val editor = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
-                            listOf(
-                                "enable_breathing", "enable_delay", "enable_intention",
-                                "enable_shake", "enable_reflection", "enable_stats", "enable_math"
-                            ).forEach { key -> editor.putBoolean(key, steps[key] as? Boolean ?: false) }
-                            (steps["math_difficulty"] as? String)?.let { editor.putString("math_difficulty", it) }
-                            editor.apply()
+                        val old = FocusPolicyClient.snapshotFrom(this, policy)
+                        var new = old
+                        (liveFields["dailyLimitMinutes"] as? Int)?.let { new = new.copy(dailyLimitMinutes = it) }
+                        (liveFields["hardBlockAfterLimit"] as? Boolean)?.let { new = new.copy(hardBlockAfterLimit = it) }
+                        (liveFields["sessionMaxMinutes"] as? Int)?.let { new = new.copy(sessionMaxMinutes = it) }
+                        (liveFields["sessionBreakMinutes"] as? Int)?.let { new = new.copy(sessionBreakMinutes = it) }
+                        @Suppress("UNCHECKED_CAST")
+                        (liveFields["appModes"] as? Map<String, String>)?.let { wire ->
+                            @Suppress("UNCHECKED_CAST")
+                            val targets = (liveFields["targetApps"] as? List<String>)?.toSet() ?: old.targetApps
+                            new = new.copy(
+                                targetApps = targets,
+                                appModes = wire.mapValues { (pkg, w) -> AppMode.fromWire(w, inTargetApps = pkg in targets) }
+                            )
+                        }
+                        @Suppress("UNCHECKED_CAST")
+                        (liveFields["blockedSurfaces"] as? Map<String, String>)?.let { wire ->
+                            new = new.copy(blockedSurfaces = wire.mapValues { SurfaceMode.fromWire(it.value) })
+                        }
+                        @Suppress("UNCHECKED_CAST")
+                        (liveFields["reelDailyLimit"] as? Map<String, Int>)?.let { new = new.copy(reelDailyLimit = it) }
+                        if (stepsBundle.isNotEmpty()) {
+                            new = new.copy(
+                                frictionSteps = frictionKeys.filterTo(mutableSetOf()) { stepsBundle[it] as? Boolean == true },
+                                mathDifficulty = stepsBundle["math_difficulty"] as? String ?: new.mathDifficulty
+                            )
                         }
 
-                        @Suppress("UNCHECKED_CAST")
-                        val surfaces = fields["blockedSurfaces"] as? Map<String, String>
-                        @Suppress("UNCHECKED_CAST")
-                        val reelLimits = fields["reelDailyLimit"] as? Map<String, Int> ?: emptyMap()
-                        if (surfaces != null) SurfaceBlocker.updateConfig(surfaces, reelLimits)
+                        val guard = FocusPolicyClient.getRatchetGuard()
+                        val now = System.currentTimeMillis()
+                        if (PolicyRatchet.classify(old, new) == ChangeDirection.LOOSEN &&
+                            PolicyRatchet.isLocked(guard.lockedUntilMs, now)
+                        ) {
+                            postToUi {
+                                Toast.makeText(
+                                    this,
+                                    "Locked until ${formatEpochMs(guard.lockedUntilMs!!)} — can't apply a mode that loosens your limits",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                            return@Thread
+                        }
+
+                        val split = PolicyRatchet.split(old, new)
+                        val presetFieldKeys = liveFields.keys - "activePresetId"
+                        val scoped = FocusPolicyClient.firestoreFieldsOf(split.applyNow).filterKeys { it in presetFieldKeys }
+                        FocusPolicyClient.updatePolicyFields(scoped + mapOf("activePresetId" to presetId))
+                        FocusPolicyClient.applyLocalFields(this, split.applyNow)
+                        SurfaceBlocker.updateConfig(
+                            split.applyNow.blockedSurfaces.mapValues { it.value.wire },
+                            split.applyNow.reelDailyLimit
+                        )
+
+                        var message = "\"$name\" mode applied."
+                        if (split.deferred != null) {
+                            val effectiveAt = PolicyRatchet.effectiveAtMs(now, guard.loosenDelayHours)
+                            FocusPolicyClient.writePendingChange(effectiveAt, now, split.deferred, split.deferredChanges.map { it.summary })
+                            message += " ${split.deferredChanges.size} change(s) that weaken your limits take effect in ${guard.loosenDelayHours}h."
+                        }
 
                         startService(Intent(this, UsageMonitorService::class.java)
                             .setAction(UsageMonitorService.ACTION_POLICY_UPDATED))
 
                         postToUi {
-                            Toast.makeText(this, "\"$name\" mode applied", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                             currentPolicy = null
                             loadPolicyIntoEditor()
                             syncFrictionSwitchStates()
+                            refreshPendingBanner()
                         }
                     } catch (e: Exception) {
                         postToUi {
@@ -517,7 +710,7 @@ class MainActivity : AppCompatActivity() {
         val appModes = policy.targetApps
             .associateWith { policy.appModes[it] ?: AppMode.LIMIT.wire }
             .filterValues { it != AppMode.OFF.wire }
-        currentPolicy = policy.copy(
+        val updatedPolicy = policy.copy(
             dailyLimitMinutes = dailyLimit,
             extensionMinutes = extMins,
             dailyExtensionLimit = extLimit,
@@ -527,18 +720,14 @@ class MainActivity : AppCompatActivity() {
             sessionMaxMinutes = sessionMax,
             sessionBreakMinutes = sessionBreak
         )
-        saveFields(
-            btn, confirmationView,
-            mapOf(
-                "dailyLimitMinutes" to dailyLimit,
-                "extensionMinutes" to extMins,
-                "dailyExtensionLimit" to extLimit,
-                "hardBlockAfterLimit" to hardBlock,
-                "targetApps" to appModes.keys.toList(),
-                "appModes" to appModes,
-                "blockWindows" to (currentPolicy?.blockWindows ?: emptyList<Map<String, Any>>()),
-                "sessionMaxMinutes" to sessionMax,
-                "sessionBreakMinutes" to sessionBreak
+        val old = FocusPolicyClient.snapshotFrom(this, policy)
+        val new = FocusPolicyClient.snapshotFrom(this, updatedPolicy)
+        currentPolicy = updatedPolicy
+        saveViaRatchet(
+            btn, confirmationView, old, new,
+            fieldKeys = setOf(
+                "dailyLimitMinutes", "extensionMinutes", "dailyExtensionLimit", "hardBlockAfterLimit",
+                "targetApps", "appModes", "blockWindows", "sessionMaxMinutes", "sessionBreakMinutes"
             )
         )
     }
@@ -553,42 +742,23 @@ class MainActivity : AppCompatActivity() {
             "instagram_reels" to (editReelLimitInstagram.text.toString().trim().toIntOrNull() ?: 0),
             "youtube_shorts" to (editReelLimitYoutube.text.toString().trim().toIntOrNull() ?: 0)
         )
-        currentPolicy = policy.copy(blockedSurfaces = blockedSurfaces, reelDailyLimit = reelDailyLimit)
-        saveFields(
-            btn, confirmationView,
-            mapOf("blockedSurfaces" to blockedSurfaces, "reelDailyLimit" to reelDailyLimit)
-        ) {
-            SurfaceBlocker.updateConfig(blockedSurfaces, reelDailyLimit)
-        }
-    }
-
-    private fun saveFields(
-        btn: View,
-        confirmationView: TextView,
-        fields: Map<String, Any>,
-        afterSave: () -> Unit = {}
-    ) {
-        btn.isEnabled = false
-        Thread {
-            try {
-                FocusPolicyClient.updatePolicyFields(fields)
-                afterSave()
-                // Tell the monitor to re-fetch immediately instead of waiting out
-                // its 15-minute policy refresh throttle.
-                startService(Intent(this, UsageMonitorService::class.java)
-                    .setAction(UsageMonitorService.ACTION_POLICY_UPDATED))
-                postToUi {
-                    confirmationView.visibility = View.VISIBLE
-                    confirmationView.postDelayed({ confirmationView.visibility = View.GONE }, 2000)
-                    btn.isEnabled = true
-                }
-            } catch (e: Exception) {
-                postToUi {
-                    Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                    btn.isEnabled = true
-                }
+        val updatedPolicy = policy.copy(blockedSurfaces = blockedSurfaces, reelDailyLimit = reelDailyLimit)
+        val old = FocusPolicyClient.snapshotFrom(this, policy)
+        val new = FocusPolicyClient.snapshotFrom(this, updatedPolicy)
+        currentPolicy = updatedPolicy
+        saveViaRatchet(
+            btn, confirmationView, old, new,
+            fieldKeys = setOf("blockedSurfaces", "reelDailyLimit"),
+            afterApply = { applied ->
+                // Use the gate-respecting applied snapshot, not the raw requested
+                // values — a loosened surface must not reach the live blocker
+                // before its delay elapses.
+                SurfaceBlocker.updateConfig(
+                    applied.blockedSurfaces.mapValues { it.value.wire },
+                    applied.reelDailyLimit
+                )
             }
-        }.start()
+        )
     }
 
     private fun loadPolicyIntoEditor() {
@@ -628,25 +798,66 @@ class MainActivity : AppCompatActivity() {
 
     // ── Sync Code ─────────────────────────────────────────────────────────────
 
+    // Switching sync codes repoints this device at a different (possibly empty)
+    // Firestore tree — every limit currently enforced stops applying the moment
+    // it happens. That used to be two taps with no confirmation; it's the
+    // cheapest way to defeat every other guard in this file, so it gets its own
+    // gate: refused outright while locked or while a block is active, otherwise
+    // an explicit dialog spelling out what's about to happen.
     private fun setupSyncCode() {
         editSyncId.setText(FocusPolicyClient.getSyncId())
-        findViewById<Button>(R.id.btnSaveSyncId).setOnClickListener {
-            val clean = FocusPolicyClient.setSyncId(this, editSyncId.text.toString())
-            editSyncId.setText(clean)
-
-            // Restart the monitor so it drops the previous account's in-memory
-            // state (target apps, cached limits) and re-fetches policy for the
-            // new code. The singleton userId is already updated in-process.
-            if (UsageMonitorService.isServiceActive) {
-                stopService(Intent(this, UsageMonitorService::class.java))
-                startService(Intent(this, UsageMonitorService::class.java))
+        findViewById<Button>(R.id.btnSaveSyncId).setOnClickListener { btn ->
+            val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            if (prefs.getBoolean("is_currently_blocked", false)) {
+                Toast.makeText(this, "Can't switch sync codes while a block is active.", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
             }
-
-            Toast.makeText(this, "Sync code set to \"$clean\"", Toast.LENGTH_SHORT).show()
-            currentPolicy = null
-            loadPolicyIntoEditor()
-            refreshDashboardData()
+            btn.isEnabled = false
+            Thread {
+                val guard = try { FocusPolicyClient.getRatchetGuard() } catch (e: Exception) { null }
+                val locked = guard != null && PolicyRatchet.isLocked(guard.lockedUntilMs, System.currentTimeMillis())
+                postToUi {
+                    btn.isEnabled = true
+                    if (locked) {
+                        Toast.makeText(
+                            this,
+                            "Locked until ${formatEpochMs(guard!!.lockedUntilMs!!)} — switching sync codes is refused while locked",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        AlertDialog.Builder(this)
+                            .setTitle("Switch sync code?")
+                            .setMessage(
+                                "This points the app at a different (possibly empty) data tree. " +
+                                "Every limit, block window and app mode currently enforced on this " +
+                                "device stops applying the moment you confirm."
+                            )
+                            .setPositiveButton("Switch") { _, _ -> doSetSyncId() }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                    }
+                }
+            }.start()
         }
+    }
+
+    private fun doSetSyncId() {
+        val clean = FocusPolicyClient.setSyncId(this, editSyncId.text.toString())
+        editSyncId.setText(clean)
+
+        // Restart the monitor so it drops the previous account's in-memory
+        // state (target apps, cached limits) and re-fetches policy for the
+        // new code. The singleton userId is already updated in-process.
+        if (UsageMonitorService.isServiceActive) {
+            stopService(Intent(this, UsageMonitorService::class.java))
+            startService(Intent(this, UsageMonitorService::class.java))
+        }
+
+        Toast.makeText(this, "Sync code set to \"$clean\"", Toast.LENGTH_SHORT).show()
+        currentPolicy = null
+        loadPolicyIntoEditor()
+        refreshDashboardData()
+        refreshPendingBanner()
     }
 
     private fun isValidTime(t: String): Boolean =
@@ -794,13 +1005,18 @@ class MainActivity : AppCompatActivity() {
         val adminComponent = ComponentName(this, PolicyDeviceAdminReceiver::class.java)
         switchDeviceAdmin.isChecked = dpm.isAdminActive(adminComponent)
 
-        switchBreathing.setOnCheckedChangeListener { _, v -> prefs.edit().putBoolean("enable_breathing", v).apply() }
-        switchDelay.setOnCheckedChangeListener { _, v -> prefs.edit().putBoolean("enable_delay", v).apply() }
-        switchIntention.setOnCheckedChangeListener { _, v -> prefs.edit().putBoolean("enable_intention", v).apply() }
-        switchShake.setOnCheckedChangeListener { _, v -> prefs.edit().putBoolean("enable_shake", v).apply() }
-        switchReflection.setOnCheckedChangeListener { _, v -> prefs.edit().putBoolean("enable_reflection", v).apply() }
-        switchStats.setOnCheckedChangeListener { _, v -> prefs.edit().putBoolean("enable_stats", v).apply() }
-        switchMath.setOnCheckedChangeListener { _, v -> prefs.edit().putBoolean("enable_math", v).apply() }
+        // Each friction step is one entry in PolicySnapshot.frictionSteps — turning
+        // one OFF is a loosening (ratcheted/deferred), turning one ON is a
+        // tightening (instant). Local SharedPreferences, but still gated: a step
+        // disabled here is exactly as much of a bypass as loosening a Firestore
+        // field would be.
+        attachFrictionToggle(switchBreathing, "enable_breathing")
+        attachFrictionToggle(switchDelay, "enable_delay")
+        attachFrictionToggle(switchIntention, "enable_intention")
+        attachFrictionToggle(switchShake, "enable_shake")
+        attachFrictionToggle(switchReflection, "enable_reflection")
+        attachFrictionToggle(switchStats, "enable_stats")
+        attachFrictionToggle(switchMath, "enable_math")
 
         switchDeviceAdmin.setOnCheckedChangeListener { _, isChecked ->
             val isActive = dpm.isAdminActive(adminComponent)
@@ -827,11 +1043,263 @@ class MainActivity : AppCompatActivity() {
         spinnerMathDifficulty.adapter = adapter
         val currentDifficulty = prefs.getString("math_difficulty", "easy") ?: "easy"
         spinnerMathDifficulty.setSelection(difficulties.indexOf(currentDifficulty).coerceAtLeast(0))
+        // easy < medium < hard (see PolicyRatchet.mathDifficultyRank) — picking an
+        // easier tier is a loosening, ratcheted the same as everything else.
         spinnerMathDifficulty.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            private var isFirstCallback = true
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                prefs.edit().putString("math_difficulty", difficulties[position]).apply()
+                if (isFirstCallback) { isFirstCallback = false; return } // fires once on attach; not a user edit
+                val chosen = difficulties[position]
+                spinnerMathDifficulty.isEnabled = false
+                Thread {
+                    try {
+                        val old = FocusPolicyClient.snapshotFrom(this@MainActivity, FocusPolicyClient.getPolicy())
+                        val new = old.copy(mathDifficulty = chosen)
+                        val guard = FocusPolicyClient.getRatchetGuard()
+                        val now = System.currentTimeMillis()
+                        if (PolicyRatchet.classify(old, new) == ChangeDirection.LOOSEN &&
+                            PolicyRatchet.isLocked(guard.lockedUntilMs, now)
+                        ) {
+                            postToUi {
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "Locked until ${formatEpochMs(guard.lockedUntilMs!!)} — can't make this easier yet",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                spinnerMathDifficulty.setSelection(difficulties.indexOf(old.mathDifficulty).coerceAtLeast(0))
+                                spinnerMathDifficulty.isEnabled = true
+                            }
+                            return@Thread
+                        }
+                        val split = PolicyRatchet.split(old, new)
+                        FocusPolicyClient.applyLocalFields(this@MainActivity, split.applyNow)
+                        var toastMsg: String? = null
+                        if (split.deferred != null) {
+                            val effectiveAt = PolicyRatchet.effectiveAtMs(now, guard.loosenDelayHours)
+                            FocusPolicyClient.writePendingChange(effectiveAt, now, split.deferred, split.deferredChanges.map { it.summary })
+                            toastMsg = "Takes effect in ${guard.loosenDelayHours}h"
+                        }
+                        postToUi {
+                            toastMsg?.let { Toast.makeText(this@MainActivity, it, Toast.LENGTH_SHORT).show() }
+                            spinnerMathDifficulty.setSelection(difficulties.indexOf(split.applyNow.mathDifficulty).coerceAtLeast(0))
+                            spinnerMathDifficulty.isEnabled = true
+                            refreshPendingBanner()
+                        }
+                    } catch (e: Exception) {
+                        postToUi {
+                            Toast.makeText(this@MainActivity, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                            spinnerMathDifficulty.isEnabled = true
+                        }
+                    }
+                }.start()
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    /** Wires one friction SwitchCompat through the same ratchet gate as the Firestore-backed cards. */
+    private fun attachFrictionToggle(switch: SwitchCompat, key: String) {
+        switch.setOnCheckedChangeListener(object : android.widget.CompoundButton.OnCheckedChangeListener {
+            override fun onCheckedChanged(buttonView: android.widget.CompoundButton, checked: Boolean) {
+                switch.isEnabled = false
+                Thread {
+                    try {
+                        val old = FocusPolicyClient.snapshotFrom(this@MainActivity, FocusPolicyClient.getPolicy())
+                        val new = old.copy(
+                            frictionSteps = if (checked) old.frictionSteps + key else old.frictionSteps - key
+                        )
+                        val guard = FocusPolicyClient.getRatchetGuard()
+                        val now = System.currentTimeMillis()
+                        if (PolicyRatchet.classify(old, new) == ChangeDirection.LOOSEN &&
+                            PolicyRatchet.isLocked(guard.lockedUntilMs, now)
+                        ) {
+                            postToUi {
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "Locked until ${formatEpochMs(guard.lockedUntilMs!!)} — can't turn this off yet",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                switch.setOnCheckedChangeListener(null)
+                                switch.isChecked = !checked
+                                switch.setOnCheckedChangeListener(this)
+                                switch.isEnabled = true
+                            }
+                            return@Thread
+                        }
+                        val split = PolicyRatchet.split(old, new)
+                        FocusPolicyClient.applyLocalFields(this@MainActivity, split.applyNow)
+                        val effectiveChecked = key in split.applyNow.frictionSteps
+                        var toastMsg: String? = null
+                        if (split.deferred != null) {
+                            val effectiveAt = PolicyRatchet.effectiveAtMs(now, guard.loosenDelayHours)
+                            FocusPolicyClient.writePendingChange(effectiveAt, now, split.deferred, split.deferredChanges.map { it.summary })
+                            toastMsg = "Takes effect in ${guard.loosenDelayHours}h"
+                        }
+                        postToUi {
+                            toastMsg?.let { Toast.makeText(this@MainActivity, it, Toast.LENGTH_SHORT).show() }
+                            switch.setOnCheckedChangeListener(null)
+                            switch.isChecked = effectiveChecked
+                            switch.setOnCheckedChangeListener(this)
+                            switch.isEnabled = true
+                            refreshPendingBanner()
+                        }
+                    } catch (e: Exception) {
+                        postToUi {
+                            Toast.makeText(this@MainActivity, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                            switch.isEnabled = true
+                        }
+                    }
+                }.start()
+            }
+        })
+    }
+
+    // ── Ratchet settings (Settings screen) ───────────────────────────────────
+
+    private fun setupRatchetSettings() {
+        val txtLockStatus = findViewById<TextView>(R.id.txtLockStatus)
+        val editDelay = findViewById<EditText>(R.id.editLoosenDelayHours)
+        val btnSaveDelay = findViewById<Button>(R.id.btnSaveLoosenDelay)
+        val btnLock = findViewById<Button>(R.id.btnLockSettings)
+        val btnClearLock = findViewById<Button>(R.id.btnClearLock)
+
+        fun refresh() {
+            Thread {
+                try {
+                    val guard = FocusPolicyClient.getRatchetGuard()
+                    postToUi {
+                        editDelay.setText(guard.loosenDelayHours.toString())
+                        val locked = PolicyRatchet.isLocked(guard.lockedUntilMs, System.currentTimeMillis())
+                        txtLockStatus.text = when {
+                            locked -> "Locked until ${formatEpochMs(guard.lockedUntilMs!!)} — no setting can be loosened until then."
+                            guard.lockedUntilMs != null -> "Lock expired ${formatEpochMs(guard.lockedUntilMs)}. Not currently locked."
+                            else -> "Not locked. Loosened changes still take effect after ${guard.loosenDelayHours}h either way."
+                        }
+                        btnClearLock.isEnabled = locked
+                    }
+                } catch (e: Exception) {
+                    // leave last-known state on screen
+                }
+            }.start()
+        }
+        refresh()
+
+        btnSaveDelay.setOnClickListener { btn ->
+            val newHours = editDelay.text.toString().trim().toIntOrNull()?.coerceAtLeast(0)
+            if (newHours == null) {
+                Toast.makeText(this, "Enter a whole number of hours", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            btn.isEnabled = false
+            Thread {
+                try {
+                    val guard = FocusPolicyClient.getRatchetGuard()
+                    val now = System.currentTimeMillis()
+                    val direction = PolicyRatchet.classifyDelayChange(guard.loosenDelayHours, newHours)
+                    if (direction == ChangeDirection.LOOSEN && PolicyRatchet.isLocked(guard.lockedUntilMs, now)) {
+                        postToUi {
+                            Toast.makeText(
+                                this,
+                                "Locked until ${formatEpochMs(guard.lockedUntilMs!!)} — can't shorten the delay yet",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            btn.isEnabled = true
+                        }
+                        return@Thread
+                    }
+                    // NOTE: raising the delay applies immediately. Lowering it is
+                    // gated by the commitment lock above but is NOT additionally
+                    // time-deferred by the current (longer) delay value — doing
+                    // that fully needs its own pending-style field in
+                    // FocusPolicyClient, which this pass intentionally left
+                    // untouched. Flagged in the task report, not hidden here.
+                    FocusPolicyClient.updateRatchetGuard(loosenDelayHours = newHours)
+                    postToUi {
+                        Toast.makeText(this, "Loosen delay set to ${newHours}h", Toast.LENGTH_SHORT).show()
+                        btn.isEnabled = true
+                        refresh()
+                    }
+                } catch (e: Exception) {
+                    postToUi {
+                        Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                        btn.isEnabled = true
+                    }
+                }
+            }.start()
+        }
+
+        btnLock.setOnClickListener {
+            val choices = arrayOf("7 days", "30 days", "90 days")
+            val days = arrayOf(7, 30, 90)
+            AlertDialog.Builder(this)
+                .setTitle("Lock settings")
+                .setMessage(
+                    "While locked, nothing on Rules or Settings can be loosened — only " +
+                    "tightened. This is friction against your own future impulse, not a hard " +
+                    "technical lock: clearing app data or uninstalling still works."
+                )
+                .setItems(choices) { _, which ->
+                    val untilMs = System.currentTimeMillis() + days[which] * 24L * 60 * 60 * 1000
+                    Thread {
+                        try {
+                            val guard = FocusPolicyClient.getRatchetGuard()
+                            val now = System.currentTimeMillis()
+                            // Extending (or setting for the first time) is a tightening —
+                            // instant. Picking a SHORTER date than an existing lock would be
+                            // a loosening of that lock, gated by the lock itself.
+                            val wouldShorten = guard.lockedUntilMs != null && untilMs <= guard.lockedUntilMs
+                            if (wouldShorten && PolicyRatchet.isLocked(guard.lockedUntilMs, now)) {
+                                postToUi {
+                                    Toast.makeText(
+                                        this,
+                                        "Already locked further out (until ${formatEpochMs(guard.lockedUntilMs!!)}) — can't shorten it",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                                return@Thread
+                            }
+                            FocusPolicyClient.updateRatchetGuard(lockedUntilMs = untilMs)
+                            postToUi {
+                                Toast.makeText(this, "Locked until ${formatEpochMs(untilMs)}", Toast.LENGTH_SHORT).show()
+                                refresh()
+                            }
+                        } catch (e: Exception) {
+                            postToUi { Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show() }
+                        }
+                    }.start()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+
+        btnClearLock.setOnClickListener {
+            Thread {
+                try {
+                    val guard = FocusPolicyClient.getRatchetGuard()
+                    val now = System.currentTimeMillis()
+                    val stillLocked = PolicyRatchet.isLocked(guard.lockedUntilMs, now)
+                    postToUi {
+                        if (stillLocked) {
+                            Toast.makeText(
+                                this,
+                                "Can't remove a lock before it expires (${formatEpochMs(guard.lockedUntilMs!!)}) — that would defeat the point",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } else {
+                            Thread {
+                                try {
+                                    FocusPolicyClient.updateRatchetGuard(clearLock = true)
+                                    postToUi { Toast.makeText(this, "Lock cleared", Toast.LENGTH_SHORT).show(); refresh() }
+                                } catch (e: Exception) {
+                                    postToUi { Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show() }
+                                }
+                            }.start()
+                        }
+                    }
+                } catch (e: Exception) {
+                    postToUi { Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show() }
+                }
+            }.start()
         }
     }
 
@@ -842,11 +1310,30 @@ class MainActivity : AppCompatActivity() {
         refreshProtectionStatus()
         refreshDashboardData()
         refreshReelDetection()
+        refreshPendingBanner()
         val switchDeviceAdmin = findViewById<SwitchCompat>(R.id.switchDeviceAdmin)
         val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val adminComponent = ComponentName(this, PolicyDeviceAdminReceiver::class.java)
         switchDeviceAdmin.isChecked = dpm.isAdminActive(adminComponent)
         UpdateChecker.resumePendingInstall(this)
+
+        // A deferred loosening whose delay has elapsed takes effect on the next
+        // time the user opens the app — no separate scheduler on this side (the
+        // other planned call site is UsageMonitorService, wired separately).
+        Thread {
+            try {
+                if (FocusPolicyClient.applyDuePendingChange(this)) {
+                    postToUi {
+                        Toast.makeText(this, "A previously-deferred change just took effect", Toast.LENGTH_LONG).show()
+                        currentPolicy = null
+                        loadPolicyIntoEditor()
+                        refreshPendingBanner()
+                    }
+                }
+            } catch (e: Exception) {
+                // Best-effort; the next resume retries.
+            }
+        }.start()
     }
 
     // ── Status & Dashboard ────────────────────────────────────────────────────
