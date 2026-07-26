@@ -7,6 +7,12 @@ import android.util.Log
 import com.focuslock.service.UsageMonitorService
 import com.focuslock.update.UpdateChecker
 
+// Shared with UsageMonitorService's heartbeat-gap watchdog — see
+// EnforcementHealth.detectGap. Same "FocusLockPrefs" file the rest of the app
+// uses (FocusPolicyClient, MainActivity).
+private const val PREFS_NAME = "FocusLockPrefs"
+private const val PREF_BOOT_COMPLETED_AT_MS = "boot_completed_at_ms"
+
 // Best-effort restart: UsageMonitorService is a plain (non-foreground) service, so
 // starting it here can be dropped by OEM background-start restrictions on some
 // devices. That's acceptable — FocusAccessibilityService.onServiceConnected() is the
@@ -23,6 +29,12 @@ class BootCompletedReceiver : BroadcastReceiver() {
             intent?.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
 
             Log.d(TAG, "Boot/update received, starting UsageMonitorService")
+
+            // Record so the watchdog can tell "device was off" apart from
+            // "process was killed / accessibility disabled while running" —
+            // a boot landing inside a heartbeat gap explains it.
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putLong(PREF_BOOT_COMPLETED_AT_MS, System.currentTimeMillis()).apply()
 
             try {
                 context.startService(Intent(context, UsageMonitorService::class.java))

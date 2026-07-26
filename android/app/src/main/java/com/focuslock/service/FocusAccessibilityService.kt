@@ -30,6 +30,13 @@ class FocusAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         SurfaceBlocker.reset()
+        // Re-enable signal, paired with the disable recorded in onUnbind below —
+        // closes out any open "enforcement stopped" entry with a real duration.
+        try {
+            UsageMonitorService.closeAccessibilityDisabled(this)
+        } catch (e: Exception) {
+            // Best-effort — must not block the monitor restart below.
+        }
         // UsageMonitorService is a plain (non-foreground) service; the accessibility
         // binding above is what actually keeps this process alive, so restart the
         // monitor here rather than relying solely on BootCompletedReceiver — this is
@@ -43,6 +50,17 @@ class FocusAccessibilityService : AccessibilityService() {
 
     override fun onUnbind(intent: Intent?): Boolean {
         if (instance === this) instance = null
+        // Direct, immediate signal that enforcement just stopped — fires on a
+        // deliberate accessibility disable, but also on app update, process
+        // kill, and device shutdown. Not proof of tampering by itself; see
+        // UsageMonitorService.closeAccessibilityDisabled for the boot/replace
+        // cross-reference that downgrades the explainable cases. Wrapped
+        // defensively so a failure here can never cost the reel-count flush.
+        try {
+            UsageMonitorService.recordAccessibilityDisabled(this)
+        } catch (e: Exception) {
+            // Best-effort — must not block SurfaceBlocker.flushNow() below.
+        }
         SurfaceBlocker.flushNow()
         return super.onUnbind(intent)
     }

@@ -14,7 +14,11 @@ import android.provider.Settings
 import android.util.Log
 import com.focuslock.R
 import com.focuslock.data.FocusPolicyClient
+import com.focuslock.security.EnforcementChecks
+import com.focuslock.security.EnforcementHealth
 import com.focuslock.surface.SurfaceBlocker
+import org.json.JSONArray
+import org.json.JSONObject
 import java.time.LocalDate
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -29,6 +33,25 @@ class UsageMonitorService : Service() {
         private const val NOTIFICATION_OVERLAY_PERM_ID = 1103
         private const val NOTIFICATION_LIMIT_REACHED_ID = 1104
         private const val OVERLAY_COOLDOWN_MS = 3000L
+
+        // ── Cold-start fail-closed + heartbeat-gap watchdog ──────────────────
+        // Same "FocusLockPrefs" file FocusPolicyClient/MainActivity use.
+        private const val PREFS_NAME = "FocusLockPrefs"
+        private const val PREF_POLICY_EVER_FETCHED = "policy_ever_fetched"
+        private const val PREF_SHADOW_USED_MINUTES = "shadow_used_minutes"
+        private const val PREF_SHADOW_EFFECTIVE_LIMIT = "shadow_effective_limit"
+        private const val PREF_SHADOW_ALLOW_NOW = "shadow_allow_now"
+        private const val PREF_SHADOW_HARD_BLOCK = "shadow_hard_block"
+        private const val PREF_HEARTBEAT_LAST_SEEN_MS = "heartbeat_last_seen_ms"
+        private const val PREF_BOOT_COMPLETED_AT_MS = "boot_completed_at_ms"
+        private const val PREF_GAP_HISTORY = "enforcement_gap_history"
+
+        // IDLE (accessibility still enabled) is now a benign category, so this
+        // only controls noise volume, not tamper sensitivity — the real tamper
+        // signal is the direct accessibility-enabled read at classification
+        // time. Set well above ordinary idle gaps (screen-off, user not
+        // touching a managed app) so IDLE entries aren't constant.
+        private const val HEARTBEAT_GAP_THRESHOLD_MS = 30 * 60 * 1000L
 
         const val ACTION_DISMISS_LOCK_OVERLAY = "com.focuslock.DISMISS_LOCK_OVERLAY"
         const val ACTION_FOREGROUND_CHANGED = "com.focuslock.ACTION_FOREGROUND_CHANGED"
@@ -51,6 +74,66 @@ class UsageMonitorService : Service() {
             internal set
         val blockedTargets = mutableSetOf<String>()
         @Volatile var lastBreakClickedAt = 0L
+
+        // ── Accessibility disable/re-enable glue ─────────────────────────────
+        // Called directly from FocusAccessibilityService.onUnbind/onServiceConnected
+        // — onUnbind is a direct, immediate signal that enforcement just stopped,
+        // strictly better than inferring it from a heartbeat gap later. Static so
+        // they're callable without a live UsageMonitorService instance (the
+        // accessibility service can unbind/reconnect independently of it).
+
+        fun recordAccessibilityDisabled(context: Context) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val history = decodeGapHistory(prefs.getString(PREF_GAP_HISTORY, null))
+            val updated = EnforcementHealth.recordGap(
+                history, EnforcementHealth.observedDisabled(System.currentTimeMillis())
+            )
+            prefs.edit().putString(PREF_GAP_HISTORY, encodeGapHistory(updated)).apply()
+        }
+
+        fun closeAccessibilityDisabled(context: Context) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val history = decodeGapHistory(prefs.getString(PREF_GAP_HISTORY, null))
+            val bootAt = if (prefs.contains(PREF_BOOT_COMPLETED_AT_MS)) {
+                prefs.getLong(PREF_BOOT_COMPLETED_AT_MS, 0L)
+            } else null
+            val updated = EnforcementHealth.closeOpenDisabledGap(
+                history, System.currentTimeMillis(), bootAt
+            )
+            prefs.edit().putString(PREF_GAP_HISTORY, encodeGapHistory(updated)).apply()
+        }
+
+        private fun encodeGapHistory(history: List<EnforcementHealth.HeartbeatGap>): String {
+            val arr = JSONArray()
+            history.forEach { gap ->
+                arr.put(JSONObject().apply {
+                    put("startMs", gap.startMs)
+                    put("endMs", gap.endMs)
+                    put("durationMs", gap.durationMs)
+                    put("cause", gap.cause.name)
+                })
+            }
+            return arr.toString()
+        }
+
+        private fun decodeGapHistory(json: String?): List<EnforcementHealth.HeartbeatGap> {
+            if (json.isNullOrEmpty()) return emptyList()
+            return try {
+                val arr = JSONArray(json)
+                (0 until arr.length()).map { i ->
+                    val o = arr.getJSONObject(i)
+                    EnforcementHealth.HeartbeatGap(
+                        startMs = o.getLong("startMs"),
+                        endMs = o.getLong("endMs"),
+                        durationMs = o.getLong("durationMs"),
+                        cause = EnforcementHealth.GapCause.valueOf(o.getString("cause"))
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Gap history decode failed — discarding", e)
+                emptyList()
+            }
+        }
     }
 
     // Dynamic target set — starts empty, populated from policy. An app is a
@@ -103,6 +186,11 @@ class UsageMonitorService : Service() {
     private val chunkTracker = SessionChunkTracker()
     private var chunkCapRunnable: Runnable? = null
 
+    // Bounded history of detected enforcement-heartbeat gaps (most recent
+    // first) — read accessor for future UI surfacing. Not persisted across
+    // process restarts beyond what's in PREF_GAP_HISTORY, which is reloaded here.
+    private var gapHistory: List<EnforcementHealth.HeartbeatGap> = emptyList()
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     override fun onCreate() {
@@ -111,6 +199,8 @@ class UsageMonitorService : Service() {
         FocusPolicyClient.init(this)
         SurfaceBlocker.init(this)
         createNotificationChannels()
+        restorePersistedShadowState()
+        checkHeartbeatGapOnStart()
 
         // One-time cold-start seed so the daily reel quota survives a process
         // restart mid-day instead of silently resetting to zero.
@@ -154,6 +244,7 @@ class UsageMonitorService : Service() {
         }
 
         isRunning.set(true)
+        touchHeartbeat()
         maybeRefreshPolicy()
         return START_STICKY
     }
@@ -371,6 +462,7 @@ class UsageMonitorService : Service() {
                 localAllowNow = decision.allowNow
                 localHardBlock = decision.hardBlockAfterLimit
                 hadSuccessfulEvaluate = true
+                persistShadowState()
 
                 handler.post {
                     isOverLimitSoft = decision.action == "soft-limit"
@@ -423,6 +515,7 @@ class UsageMonitorService : Service() {
                 if (currentForegroundTarget != packageName) return
 
                 localUsedMinutes += 1.0
+                touchHeartbeat()
                 Log.d(TAG, "Local tracker: %.1f / %d min".format(localUsedMinutes, localEffectiveLimit))
 
                 if (localEffectiveLimit > 0) {
@@ -526,6 +619,98 @@ class UsageMonitorService : Service() {
         getSharedPreferences("FocusLockPrefs", Context.MODE_PRIVATE)
             .edit().putBoolean("is_currently_blocked", isBlocked).apply()
     }
+
+    // ── Cold-start fail-closed ────────────────────────────────────────────────
+
+    // Loads whatever shadow state survived from the last successful evaluate()
+    // before this process existed. Without this, hadSuccessfulEvaluate resets to
+    // false on every cold start, and the "no prior data — allow silently" branch
+    // in evaluateAndLockIfNeeded() fires even on a device that was blocked
+    // offline right before it was force-stopped — the airplane-mode bypass.
+    private fun restorePersistedShadowState() {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val everFetched = prefs.getBoolean(PREF_POLICY_EVER_FETCHED, false)
+        if (EnforcementHealth.shouldAllowFreshInstall(everFetched)) return // genuine first run — nothing to restore
+        hadSuccessfulEvaluate = true
+        localUsedMinutes = prefs.getFloat(PREF_SHADOW_USED_MINUTES, 0f).toDouble()
+        localEffectiveLimit = prefs.getInt(PREF_SHADOW_EFFECTIVE_LIMIT, 0)
+        localAllowNow = prefs.getBoolean(PREF_SHADOW_ALLOW_NOW, true)
+        localHardBlock = prefs.getBoolean(PREF_SHADOW_HARD_BLOCK, true)
+        Log.d(TAG, "Restored persisted shadow: used=$localUsedMinutes limit=$localEffectiveLimit allow=$localAllowNow")
+    }
+
+    // Called after every successful evaluate() — durably records "a policy has
+    // been fetched at least once" plus the enforcement-relevant snapshot, so a
+    // cold start with no network and no Firestore cache fails closed instead of
+    // allowing silently.
+    private fun persistShadowState() {
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putBoolean(PREF_POLICY_EVER_FETCHED, true)
+            .putFloat(PREF_SHADOW_USED_MINUTES, localUsedMinutes.toFloat())
+            .putInt(PREF_SHADOW_EFFECTIVE_LIMIT, localEffectiveLimit)
+            .putBoolean(PREF_SHADOW_ALLOW_NOW, localAllowNow)
+            .putBoolean(PREF_SHADOW_HARD_BLOCK, localHardBlock)
+            .apply()
+    }
+
+    // ── Heartbeat-gap watchdog ────────────────────────────────────────────────
+
+    // Called on every existing tick that already runs while the service is
+    // functioning — the 60 s in-app local timer and each foreground-change
+    // dispatch — rather than adding a new scheduler.
+    private fun touchHeartbeat() {
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putLong(PREF_HEARTBEAT_LAST_SEEN_MS, System.currentTimeMillis())
+            .apply()
+    }
+
+    // Compares now against the last heartbeat left by a previous process, then
+    // classifies any gap using the real signal — a direct read of whether
+    // accessibility is enabled right now — rather than guessing from the gap
+    // alone. A gap with accessibility still on is almost certainly the user
+    // not touching the phone (IDLE); a gap with accessibility off is the real
+    // tamper signal (DISABLED); a boot/package-replace landing in the window
+    // explains it either way (EXPLAINED). Also records a direct DISABLED
+    // observation whenever accessibility is off, even with no gap at all —
+    // that's stronger evidence than any inference from timing.
+    private fun checkHeartbeatGapOnStart() {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val lastSeen = if (prefs.contains(PREF_HEARTBEAT_LAST_SEEN_MS)) {
+            prefs.getLong(PREF_HEARTBEAT_LAST_SEEN_MS, 0L)
+        } else null
+        val bootAt = if (prefs.contains(PREF_BOOT_COMPLETED_AT_MS)) {
+            prefs.getLong(PREF_BOOT_COMPLETED_AT_MS, 0L)
+        } else null
+        val accessibilityEnabled = EnforcementChecks.readStatus(this).accessibility
+        val now = System.currentTimeMillis()
+
+        gapHistory = decodeGapHistory(prefs.getString(PREF_GAP_HISTORY, null))
+
+        val gap = EnforcementHealth.detectGap(
+            nowMs = now,
+            lastSeenAtMs = lastSeen,
+            thresholdMs = HEARTBEAT_GAP_THRESHOLD_MS,
+            bootCompletedAtMs = bootAt,
+            accessibilityEnabledNow = accessibilityEnabled
+        )
+        if (gap != null) {
+            Log.w(TAG, "Enforcement heartbeat gap: ${gap.durationMs / 1000}s, cause=${gap.cause}")
+            gapHistory = EnforcementHealth.recordGap(gapHistory, gap)
+        }
+        // Direct observation beats inference — record it independently of
+        // whether a timing gap was also found (e.g. accessibility disabled
+        // just now, heartbeat still fresh from a moment ago).
+        if (!accessibilityEnabled) {
+            gapHistory = EnforcementHealth.recordGap(gapHistory, EnforcementHealth.observedDisabled(now))
+        }
+        if (gap != null || !accessibilityEnabled) {
+            prefs.edit().putString(PREF_GAP_HISTORY, encodeGapHistory(gapHistory)).apply()
+        }
+        touchHeartbeat()
+    }
+
+    /** Read accessor for the bounded gap history — surfaced in the UI later. */
+    fun getEnforcementGapHistory(): List<EnforcementHealth.HeartbeatGap> = gapHistory
 
     // ── Overlay helpers ───────────────────────────────────────────────────────
 
