@@ -11,6 +11,7 @@ import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.SetOptions
+import com.focuslock.surface.SurfaceMode
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -439,7 +440,12 @@ object FocusPolicyClient {
         // Session chunking: after sessionMaxMinutes of cumulative managed-app
         // use, a sessionBreakMinutes hard break. 0 = disabled.
         val sessionMaxMinutes: Int = 0,
-        val sessionBreakMinutes: Int = 0
+        val sessionBreakMinutes: Int = 0,
+        // Ratchet controls (see PolicyRatchet). Display-only here — the actual
+        // lock/delay gate at save time re-reads via getRatchetGuard() so a lock
+        // set from another device a moment ago is never missed by a stale cache.
+        val loosenDelayHours: Int = 24,
+        val settingsLockedUntilMs: Long? = null
     )
 
     fun getPolicy(): PolicyData {
@@ -470,7 +476,9 @@ object FocusPolicyClient {
             presets = (data["presets"] as? Map<String, Map<String, Any>>) ?: emptyMap(),
             activePresetId = data["activePresetId"] as? String ?: "",
             sessionMaxMinutes = (data["sessionMaxMinutes"] as? Number)?.toInt() ?: 0,
-            sessionBreakMinutes = (data["sessionBreakMinutes"] as? Number)?.toInt() ?: 0
+            sessionBreakMinutes = (data["sessionBreakMinutes"] as? Number)?.toInt() ?: 0,
+            loosenDelayHours = (data["loosenDelayHours"] as? Number)?.toInt() ?: 24,
+            settingsLockedUntilMs = (data["settingsLockedUntilMs"] as? Number)?.toLong()
         )
     }
 
@@ -486,6 +494,200 @@ object FocusPolicyClient {
             db.collection("users").document(userId)
                 .collection("policy").document("global").set(fields, SetOptions.merge())
         )
+    }
+
+    // ── Ratchet: guard read, snapshot conversion, pending doc ────────────────
+
+    data class RatchetGuard(val loosenDelayHours: Int, val lockedUntilMs: Long?)
+
+    /**
+     * Fresh (uncached) read of just the two gate fields. Called at the moment a
+     * save is about to happen, not from [currentPolicy]-style cached state — a
+     * lock set from another device a second ago must still be honored.
+     */
+    fun getRatchetGuard(): RatchetGuard {
+        val snap = Tasks.await(
+            db.collection("users").document(userId)
+                .collection("policy").document("global").get()
+        )
+        val data = snap.data ?: mapOf<String, Any>()
+        return RatchetGuard(
+            loosenDelayHours = (data["loosenDelayHours"] as? Number)?.toInt() ?: 24,
+            lockedUntilMs = (data["settingsLockedUntilMs"] as? Number)?.toLong()
+        )
+    }
+
+    fun updateRatchetGuard(loosenDelayHours: Int? = null, lockedUntilMs: Long? = null, clearLock: Boolean = false) {
+        val fields = mutableMapOf<String, Any>()
+        loosenDelayHours?.let { fields["loosenDelayHours"] = it }
+        if (clearLock) {
+            fields["settingsLockedUntilMs"] = FieldValue.delete()
+        } else {
+            lockedUntilMs?.let { fields["settingsLockedUntilMs"] = it }
+        }
+        updatePolicyFields(fields)
+    }
+
+    // frictionSteps/mathDifficulty live in local SharedPreferences, not
+    // Firestore — PolicyRatchet is pure Kotlin with no Android dependency, so
+    // this client is where the two worlds are stitched into one PolicySnapshot.
+    private val frictionPrefKeys = listOf(
+        "enable_breathing", "enable_delay", "enable_intention",
+        "enable_shake", "enable_reflection", "enable_stats", "enable_math"
+    )
+
+    /** The full effective policy right now: [policy] (already-fetched Firestore state) + local friction/math prefs. */
+    fun snapshotFrom(context: Context, policy: PolicyData): PolicySnapshot {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val targetApps = policy.targetApps.toSet()
+        return PolicySnapshot(
+            dailyLimitMinutes = policy.dailyLimitMinutes,
+            hardBlockAfterLimit = policy.hardBlockAfterLimit,
+            extensionMinutes = policy.extensionMinutes,
+            dailyExtensionLimit = policy.dailyExtensionLimit,
+            targetApps = targetApps,
+            appModes = policy.appModes.mapValues { (pkg, wire) -> AppMode.fromWire(wire, inTargetApps = pkg in targetApps) },
+            blockWindows = policy.blockWindows.map { w ->
+                BlockWindowSnapshot(
+                    start = w["start"] as? String ?: "00:00",
+                    end = w["end"] as? String ?: "23:59",
+                    days = ((w["days"] as? List<*>)?.map { (it as Number).toInt() } ?: (0..6).toList()).toSet()
+                )
+            },
+            blockedSurfaces = policy.blockedSurfaces.mapValues { SurfaceMode.fromWire(it.value) },
+            reelDailyLimit = policy.reelDailyLimit,
+            sessionMaxMinutes = policy.sessionMaxMinutes,
+            sessionBreakMinutes = policy.sessionBreakMinutes,
+            frictionSteps = frictionPrefKeys.filterTo(mutableSetOf()) { prefs.getBoolean(it, true) },
+            mathDifficulty = prefs.getString("math_difficulty", "easy") ?: "easy"
+        )
+    }
+
+    /** policy/global-shaped fields for the Firestore half of [snapshot] — excludes frictionSteps/mathDifficulty, see [applyLocalFields]. */
+    fun firestoreFieldsOf(snapshot: PolicySnapshot): Map<String, Any> = mapOf(
+        "dailyLimitMinutes" to snapshot.dailyLimitMinutes,
+        "hardBlockAfterLimit" to snapshot.hardBlockAfterLimit,
+        "extensionMinutes" to snapshot.extensionMinutes,
+        "dailyExtensionLimit" to snapshot.dailyExtensionLimit,
+        "targetApps" to snapshot.targetApps.toList(),
+        "appModes" to snapshot.appModes.mapValues { it.value.wire },
+        "blockWindows" to snapshot.blockWindows.map { w -> mapOf("start" to w.start, "end" to w.end, "days" to w.days.toList()) },
+        "blockedSurfaces" to snapshot.blockedSurfaces.mapValues { it.value.wire },
+        "reelDailyLimit" to snapshot.reelDailyLimit,
+        "sessionMaxMinutes" to snapshot.sessionMaxMinutes,
+        "sessionBreakMinutes" to snapshot.sessionBreakMinutes
+    )
+
+    /** Writes the local-prefs half of [snapshot] (frictionSteps/mathDifficulty). */
+    fun applyLocalFields(context: Context, snapshot: PolicySnapshot) {
+        val editor = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+        frictionPrefKeys.forEach { key -> editor.putBoolean(key, key in snapshot.frictionSteps) }
+        editor.putString("math_difficulty", snapshot.mathDifficulty)
+        editor.apply()
+    }
+
+    // Pending-doc storage needs frictionSteps/mathDifficulty alongside the
+    // Firestore fields (a deferred save can loosen a local field too), so this
+    // is a superset of firestoreFieldsOf, not a reuse of PolicyData's shape.
+    private fun snapshotToPendingMap(snapshot: PolicySnapshot): Map<String, Any> =
+        firestoreFieldsOf(snapshot) + mapOf(
+            "frictionSteps" to snapshot.frictionSteps.toList(),
+            "mathDifficulty" to snapshot.mathDifficulty
+        )
+
+    private fun snapshotFromPendingMap(map: Map<String, Any>): PolicySnapshot {
+        @Suppress("UNCHECKED_CAST")
+        val targetApps = (map["targetApps"] as? List<String>)?.toSet() ?: emptySet()
+        @Suppress("UNCHECKED_CAST")
+        val appModesWire = map["appModes"] as? Map<String, String> ?: emptyMap()
+        @Suppress("UNCHECKED_CAST")
+        val blockedSurfacesWire = map["blockedSurfaces"] as? Map<String, String> ?: emptyMap()
+        @Suppress("UNCHECKED_CAST")
+        val reelDailyLimit = (map["reelDailyLimit"] as? Map<String, Number>)?.mapValues { it.value.toInt() } ?: emptyMap()
+        @Suppress("UNCHECKED_CAST")
+        val blockWindows = (map["blockWindows"] as? List<Map<String, Any>>)?.map { w ->
+            BlockWindowSnapshot(
+                start = w["start"] as? String ?: "00:00",
+                end = w["end"] as? String ?: "23:59",
+                days = ((w["days"] as? List<*>)?.map { (it as Number).toInt() } ?: (0..6).toList()).toSet()
+            )
+        } ?: emptyList()
+        @Suppress("UNCHECKED_CAST")
+        val frictionSteps = (map["frictionSteps"] as? List<String>)?.toSet() ?: emptySet()
+        return PolicySnapshot(
+            dailyLimitMinutes = (map["dailyLimitMinutes"] as? Number)?.toInt() ?: 0,
+            hardBlockAfterLimit = map["hardBlockAfterLimit"] as? Boolean ?: false,
+            extensionMinutes = (map["extensionMinutes"] as? Number)?.toInt() ?: 15,
+            dailyExtensionLimit = (map["dailyExtensionLimit"] as? Number)?.toInt() ?: 1,
+            targetApps = targetApps,
+            appModes = appModesWire.mapValues { (pkg, wire) -> AppMode.fromWire(wire, inTargetApps = pkg in targetApps) },
+            blockWindows = blockWindows,
+            blockedSurfaces = blockedSurfacesWire.mapValues { SurfaceMode.fromWire(it.value) },
+            reelDailyLimit = reelDailyLimit,
+            sessionMaxMinutes = (map["sessionMaxMinutes"] as? Number)?.toInt() ?: 0,
+            sessionBreakMinutes = (map["sessionBreakMinutes"] as? Number)?.toInt() ?: 0,
+            frictionSteps = frictionSteps,
+            mathDifficulty = map["mathDifficulty"] as? String ?: "easy"
+        )
+    }
+
+    data class PendingChange(
+        val effectiveAtMs: Long,
+        val requestedAtMs: Long,
+        val snapshot: PolicySnapshot,
+        val summaries: List<String>
+    )
+
+    fun getPendingChange(): PendingChange? {
+        val snap = Tasks.await(
+            db.collection("users").document(userId).collection("policy").document("pending").get()
+        )
+        val data = snap.data ?: return null
+        @Suppress("UNCHECKED_CAST")
+        val snapshotMap = data["snapshot"] as? Map<String, Any> ?: return null
+        val effectiveAtMs = (data["effectiveAtMs"] as? Number)?.toLong() ?: return null
+        @Suppress("UNCHECKED_CAST")
+        val summaries = (data["summaries"] as? List<String>) ?: emptyList()
+        return PendingChange(
+            effectiveAtMs = effectiveAtMs,
+            requestedAtMs = (data["requestedAtMs"] as? Number)?.toLong() ?: 0L,
+            snapshot = snapshotFromPendingMap(snapshotMap),
+            summaries = summaries
+        )
+    }
+
+    fun writePendingChange(effectiveAtMs: Long, requestedAtMs: Long, snapshot: PolicySnapshot, summaries: List<String>) {
+        val data = mapOf(
+            "effectiveAtMs" to effectiveAtMs,
+            "requestedAtMs" to requestedAtMs,
+            "snapshot" to snapshotToPendingMap(snapshot),
+            "summaries" to summaries
+        )
+        Tasks.await(
+            db.collection("users").document(userId).collection("policy").document("pending").set(data)
+        )
+    }
+
+    /** Cancelling a pending loosening is itself a tightening — deletes outright, no delay of its own. */
+    fun cancelPendingChange() {
+        Tasks.await(
+            db.collection("users").document(userId).collection("policy").document("pending").delete()
+        )
+    }
+
+    /**
+     * If policy/pending is due, merges its snapshot into policy/global + local
+     * prefs and deletes the pending doc. Returns whether anything applied.
+     * Called from MainActivity.onResume; a second call site from
+     * UsageMonitorService is wired separately (not added here).
+     */
+    fun applyDuePendingChange(context: Context): Boolean {
+        val pending = getPendingChange() ?: return false
+        if (!PolicyRatchet.isDue(pending.effectiveAtMs, System.currentTimeMillis())) return false
+        updatePolicyFields(firestoreFieldsOf(pending.snapshot))
+        applyLocalFields(context, pending.snapshot)
+        cancelPendingChange()
+        return true
     }
 
     // ── Weekly usage ──────────────────────────────────────────────────────────
