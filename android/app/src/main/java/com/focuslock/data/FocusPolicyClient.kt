@@ -1389,4 +1389,208 @@ object FocusPolicyClient {
             consistencyPercent = (data["consistencyPercent"] as? Number)?.toDouble() ?: 0.0
         )
     }
+
+    // ── Group challenges ──────────────────────────────────────────────────────
+    //
+    // Top-level `challenges/{challengeId}` collection, keyed by uid like
+    // profiles/friendships/leaderboards above (participants can be on
+    // different sync-code trees). Invite model: SIMPLER than a request/accept
+    // flow — the creator picks accepted friends at creation time and they are
+    // immediately participants, no separate accept/decline step. Chosen over
+    // a request/accept flow purely for time; the known limitation is a friend
+    // gets no notification of being added and only discovers it the next time
+    // they open the app and getMyChallenges() runs (no push/digest — out of
+    // scope per the task). The doc is otherwise immutable after creation (no
+    // updateChallenge is exposed) — simplest defensible rule shape, matching
+    // firestore.rules below.
+    //
+    // `challenges/{challengeId}/progress/{uid}` mirrors streak/current: one
+    // doc per participant, written only by that participant's own client via
+    // [recordTodaysChallengeProgress], called from the same onResume call
+    // site as recordTodaysStreakOutcome() (no second daily trigger).
+    //
+    // Dates are local-date strings (java.time.LocalDate.toString(), e.g.
+    // "2026-07-26") — the same convention used by usage_days/{date} and
+    // streak/current elsewhere in this file.
+
+    data class Challenge(
+        val challengeId: String,
+        val creatorUid: String,
+        val type: ChallengeProgress.ChallengeType,
+        val startDate: String,
+        val endDate: String,
+        val participantUids: List<String>,
+        val createdAt: String
+    )
+
+    data class ChallengeLeaderboardEntry(
+        val uid: String,
+        val displayName: String,
+        val daysMet: Int,
+        val daysTotal: Int,
+        val stillIn: Boolean
+    )
+
+    private fun challengesCollection() = db.collection("challenges")
+
+    private fun challengeFromDoc(doc: com.google.firebase.firestore.DocumentSnapshot): Challenge? {
+        val data = doc.data ?: return null
+        val creatorUid = data["creatorUid"] as? String ?: return null
+        @Suppress("UNCHECKED_CAST")
+        val participantUids = (data["participantUids"] as? List<String>) ?: return null
+        return Challenge(
+            challengeId = doc.id,
+            creatorUid = creatorUid,
+            type = ChallengeProgress.ChallengeType.fromWire(data["type"] as? String ?: "no_reels"),
+            startDate = data["startDate"] as? String ?: "",
+            endDate = data["endDate"] as? String ?: "",
+            participantUids = participantUids,
+            createdAt = data["createdAt"] as? String ?: ""
+        )
+    }
+
+    /**
+     * Creates a challenge with the creator auto-included alongside
+     * [friendUids] (accepted friends chosen at creation time — see the
+     * invite-model note above; caller is responsible for only offering
+     * accepted friends, not re-validated here beyond dedup). [startDate]
+     * defaults to today.
+     */
+    fun createChallenge(
+        type: ChallengeProgress.ChallengeType,
+        endDate: String,
+        friendUids: List<String>,
+        startDate: String = java.time.LocalDate.now().toString()
+    ): Challenge {
+        val myUid = FirebaseAuth.getInstance().currentUser?.uid
+            ?: throw IllegalStateException("Not signed in")
+        val participantUids = (listOf(myUid) + friendUids).distinct()
+        val ref = challengesCollection().document()
+        val createdAt = java.time.Instant.now().toString()
+        val data = mapOf(
+            "creatorUid" to myUid,
+            "type" to type.wire,
+            "startDate" to startDate,
+            "endDate" to endDate,
+            "participantUids" to participantUids,
+            "createdAt" to createdAt
+        )
+        Tasks.await(ref.set(data))
+        return Challenge(ref.id, myUid, type, startDate, endDate, participantUids, createdAt)
+    }
+
+    /** Challenges (active + recently ended — no server-side filtering beyond membership) the caller is a participant of. */
+    fun getMyChallenges(): List<Challenge> {
+        val myUid = FirebaseAuth.getInstance().currentUser?.uid ?: return emptyList()
+        val snap = Tasks.await(
+            challengesCollection().whereArrayContains("participantUids", myUid).get()
+        )
+        return snap.documents.mapNotNull { challengeFromDoc(it) }
+            .sortedByDescending { it.startDate }
+    }
+
+    private fun challengeProgressStateFromMap(data: Map<String, Any>): ChallengeProgress.ChallengeProgressState =
+        ChallengeProgress.ChallengeProgressState(
+            daysMet = (data["daysMet"] as? Number)?.toInt() ?: 0,
+            daysTotal = (data["daysTotal"] as? Number)?.toInt() ?: 0,
+            stillIn = data["stillIn"] as? Boolean ?: true,
+            lastRecordedDate = data["lastRecordedDate"] as? String
+        )
+
+    private fun challengeProgressStateToMap(state: ChallengeProgress.ChallengeProgressState): Map<String, Any> = mapOf(
+        "daysMet" to state.daysMet,
+        "daysTotal" to state.daysTotal,
+        "stillIn" to state.stillIn,
+        "lastRecordedDate" to (state.lastRecordedDate ?: "")
+    )
+
+    /**
+     * Records today's progress for every active challenge the caller is a
+     * participant of. Call from the same daily-boundary spot
+     * recordTodaysStreakOutcome() is already called from (MainActivity.onResume)
+     * — no second daily trigger is added.
+     *
+     * "Met today's goal" per type:
+     *  - NO_REELS: sum of today's usage_days/{date}.reelCounts across all
+     *    packages is zero.
+     *  - UNDER_LIMIT: same effectiveLimit computation recordTodaysStreakOutcome
+     *    already uses (dailyLimitMinutes + capped extensions * extensionMinutes)
+     *    against today's usedMinutes — deliberately NOT duplicating a second
+     *    definition of "under limit" for this slice.
+     *
+     * Idempotency guard and end-of-window guard both live in
+     * ChallengeProgress.recordDay; this just supplies the day's raw outcome
+     * and persists inside a transaction (same race-safety reasoning as
+     * recordTodaysStreakOutcome).
+     */
+    fun recordTodaysChallengeProgress() {
+        val myUid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val today = java.time.LocalDate.now().toString()
+
+        val myChallenges = getMyChallenges().filter { today in it.startDate..it.endDate }
+        if (myChallenges.isEmpty()) return
+
+        val reelCountsToday by lazy { getReelCounts(today) }
+
+        val policySnap = Tasks.await(
+            db.collection("users").document(userId).collection("policy").document("global").get()
+        )
+        val policy = policySnap.data ?: mapOf<String, Any>()
+        val dailyLimitMinutes = (policy["dailyLimitMinutes"] as? Number)?.toInt() ?: 0
+        val extensionMinutes = (policy["extensionMinutes"] as? Number)?.toInt() ?: 15
+        val dailyExtensionLimit = (policy["dailyExtensionLimit"] as? Number)?.toInt() ?: 1
+
+        val usageSnap = Tasks.await(
+            db.collection("users").document(userId).collection("usage_days").document(today).get()
+        )
+        val usage = usageSnap.data ?: mapOf<String, Any>()
+        val usedMinutes = usage["usedMinutes"] as? Double ?: 0.0
+        val extensionsUsedToday = (usage["extensionsUsedToday"] as? Number)?.toInt() ?: 0
+        val cappedExtensions = minOf(extensionsUsedToday, dailyExtensionLimit)
+        val effectiveLimit = dailyLimitMinutes + cappedExtensions * extensionMinutes
+
+        for (challenge in myChallenges) {
+            val metGoalToday = when (challenge.type) {
+                ChallengeProgress.ChallengeType.NO_REELS -> reelCountsToday.values.sum() == 0
+                ChallengeProgress.ChallengeType.UNDER_LIMIT -> StreakTracker.isUnderLimit(usedMinutes, effectiveLimit)
+            }
+            val progressRef = challengesCollection().document(challenge.challengeId)
+                .collection("progress").document(myUid)
+            try {
+                Tasks.await(db.runTransaction { tx ->
+                    val snap = tx.get(progressRef)
+                    val prior = if (snap.exists()) challengeProgressStateFromMap(snap.data ?: emptyMap())
+                        else ChallengeProgress.ChallengeProgressState()
+                    val next = ChallengeProgress.recordDay(challenge.type, metGoalToday, prior, today, challenge.endDate)
+                    if (next != prior) tx.set(progressRef, challengeProgressStateToMap(next))
+                    next
+                })
+            } catch (e: Exception) {
+                Log.w(TAG, "recordTodaysChallengeProgress failed for ${challenge.challengeId}", e)
+            }
+        }
+    }
+
+    /** All participants' progress for one challenge, for a leaderboard-style view. */
+    fun getChallengeLeaderboard(challengeId: String): List<ChallengeLeaderboardEntry> {
+        val challengeSnap = Tasks.await(challengesCollection().document(challengeId).get())
+        val challenge = challengeFromDoc(challengeSnap) ?: return emptyList()
+        val progressSnap = Tasks.await(
+            challengesCollection().document(challengeId).collection("progress").get()
+        )
+        val progressByUid = progressSnap.documents.associate { doc ->
+            doc.id to challengeProgressStateFromMap(doc.data ?: emptyMap())
+        }
+        return challenge.participantUids.map { uid ->
+            val state = progressByUid[uid] ?: ChallengeProgress.ChallengeProgressState()
+            val displayName = try { getProfileByUid(uid)?.displayName ?: "" } catch (e: Exception) { "" }
+            ChallengeLeaderboardEntry(
+                uid = uid,
+                displayName = displayName,
+                daysMet = state.daysMet,
+                daysTotal = state.daysTotal,
+                stillIn = state.stillIn
+            )
+        }
+    }
 }

@@ -53,6 +53,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var txtMyFriendCode: TextView
     private lateinit var editFriendCode: EditText
     private lateinit var layoutFriendships: LinearLayout
+    private lateinit var layoutChallenges: LinearLayout
 
     // Policy editor fields
     private lateinit var editDailyLimit: EditText
@@ -310,6 +311,7 @@ class MainActivity : AppCompatActivity() {
         txtMyFriendCode = findViewById(R.id.txtMyFriendCode)
         editFriendCode = findViewById(R.id.editFriendCode)
         layoutFriendships = findViewById(R.id.layoutFriendships)
+        layoutChallenges = findViewById(R.id.layoutChallenges)
 
         editDailyLimit = findViewById(R.id.editDailyLimit)
         editExtensionMins = findViewById(R.id.editExtensionMins)
@@ -995,8 +997,156 @@ class MainActivity : AppCompatActivity() {
             }.start()
         }
 
+        findViewById<Button>(R.id.btnStartChallenge).setOnClickListener {
+            showStartChallengeDialog()
+        }
+
         refreshMyFriendCode()
         refreshFriendships()
+        refreshChallenges()
+    }
+
+    // ── Group challenges ───────────────────────────────────────────────────────
+    //
+    // Plumbing-not-polish, matching the friend-leaderboard list above: a
+    // button to create a challenge (type + accepted friends + day count) and
+    // a flat list of active challenges showing each participant's progress.
+
+    private fun showStartChallengeDialog() {
+        Thread {
+            val friendships = try { FocusPolicyClient.listFriendships() } catch (e: Exception) { emptyList() }
+            val accepted = friendships.filter { it.status == FocusPolicyClient.FriendshipStatus.ACCEPTED }
+            postToUi {
+                if (accepted.isEmpty()) {
+                    Toast.makeText(this, "Add an accepted friend first.", Toast.LENGTH_SHORT).show()
+                    return@postToUi
+                }
+                val container = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(48, 24, 48, 0)
+                }
+                val radioGroup = android.widget.RadioGroup(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                }
+                val radioNoReels = android.widget.RadioButton(this).apply {
+                    text = "No reels"
+                    id = View.generateViewId()
+                    isChecked = true
+                }
+                val radioUnderLimit = android.widget.RadioButton(this).apply {
+                    text = "Under your own daily limit"
+                    id = View.generateViewId()
+                }
+                radioGroup.addView(radioNoReels)
+                radioGroup.addView(radioUnderLimit)
+                container.addView(radioGroup)
+
+                val editDays = EditText(this).apply {
+                    hint = "Number of days (e.g. 7)"
+                    inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                    setText("7")
+                }
+                container.addView(editDays)
+
+                val friendLabel = TextView(this).apply {
+                    text = "Include:"
+                    setTextColor(getColor(R.color.text_secondary))
+                    setPadding(0, 24, 0, 0)
+                }
+                container.addView(friendLabel)
+                val friendChecks = accepted.map { f ->
+                    android.widget.CheckBox(this).apply {
+                        text = f.otherUid.take(8) + "…"
+                        isChecked = true
+                        tag = f.otherUid
+                    }
+                }
+                friendChecks.forEach { container.addView(it) }
+
+                AlertDialog.Builder(this)
+                    .setTitle("Start a challenge")
+                    .setView(container)
+                    .setPositiveButton("Start") { _, _ ->
+                        val type = if (radioUnderLimit.isChecked)
+                            com.focuslock.data.ChallengeProgress.ChallengeType.UNDER_LIMIT
+                        else
+                            com.focuslock.data.ChallengeProgress.ChallengeType.NO_REELS
+                        val days = editDays.text.toString().toIntOrNull()?.coerceIn(1, 90) ?: 7
+                        val friendUids = friendChecks.filter { it.isChecked }.map { it.tag as String }
+                        val endDate = java.time.LocalDate.now().plusDays((days - 1).toLong()).toString()
+                        Thread {
+                            try {
+                                FocusPolicyClient.createChallenge(type, endDate, friendUids)
+                                postToUi {
+                                    Toast.makeText(this, "Challenge started", Toast.LENGTH_SHORT).show()
+                                    refreshChallenges()
+                                }
+                            } catch (e: Exception) {
+                                postToUi { Toast.makeText(this, "Couldn't start challenge: ${e.message}", Toast.LENGTH_LONG).show() }
+                            }
+                        }.start()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        }.start()
+    }
+
+    private fun refreshChallenges() {
+        Thread {
+            try {
+                val challenges = FocusPolicyClient.getMyChallenges()
+                val leaderboards = challenges.associate { it.challengeId to
+                    (try { FocusPolicyClient.getChallengeLeaderboard(it.challengeId) } catch (e: Exception) { emptyList() }) }
+                postToUi { renderChallenges(challenges, leaderboards) }
+            } catch (e: Exception) {
+                // leave whatever was last rendered
+            }
+        }.start()
+    }
+
+    private fun renderChallenges(
+        challenges: List<FocusPolicyClient.Challenge>,
+        leaderboards: Map<String, List<FocusPolicyClient.ChallengeLeaderboardEntry>>
+    ) {
+        layoutChallenges.removeAllViews()
+        if (challenges.isEmpty()) {
+            layoutChallenges.addView(TextView(this).apply {
+                text = "No challenges yet"
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 13f
+            })
+            return
+        }
+        val today = java.time.LocalDate.now().toString()
+        for (c in challenges) {
+            val typeLabel = if (c.type == com.focuslock.data.ChallengeProgress.ChallengeType.NO_REELS) "No reels" else "Under limit"
+            val statusLabel = if (today > c.endDate) "Ended" else "Active"
+            val column = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, 8, 0, 8)
+            }
+            column.addView(TextView(this).apply {
+                text = "$typeLabel · ${c.startDate} → ${c.endDate} · $statusLabel"
+                setTextColor(getColor(R.color.text_primary))
+                textSize = 13f
+            })
+            for (entry in leaderboards[c.challengeId].orEmpty()) {
+                val name = entry.displayName.ifBlank { entry.uid.take(8) + "…" }
+                val inOut = if (c.type == com.focuslock.data.ChallengeProgress.ChallengeType.NO_REELS) {
+                    if (entry.stillIn) "still in" else "eliminated"
+                } else {
+                    ""
+                }
+                column.addView(TextView(this).apply {
+                    text = "  $name — ${entry.daysMet}/${entry.daysTotal} days met" +
+                        (if (inOut.isNotEmpty()) " · $inOut" else "")
+                    setTextColor(getColor(R.color.text_secondary))
+                    textSize = 12f
+                })
+            }
+            layoutChallenges.addView(column)
+        }
     }
 
     private fun refreshMyFriendCode() {
@@ -1788,6 +1938,15 @@ class MainActivity : AppCompatActivity() {
                 // debouncing is needed here.
                 FocusPolicyClient.recordTodaysStreakOutcome()
                 postToUi { refreshFriendships() }
+            } catch (e: Exception) {
+                // Best-effort; the next resume retries.
+            }
+            try {
+                // Same once-per-day, same call site — reuses the daily-rollover
+                // trigger above rather than adding a second one. Idempotency
+                // guard lives in ChallengeProgress.recordDay.
+                FocusPolicyClient.recordTodaysChallengeProgress()
+                postToUi { refreshChallenges() }
             } catch (e: Exception) {
                 // Best-effort; the next resume retries.
             }

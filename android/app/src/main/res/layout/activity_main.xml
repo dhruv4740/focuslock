@@ -1238,6 +1238,36 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:layout_marginTop="@dimen/space_sm"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="CHALLENGES"
+                android:layout_marginTop="@dimen/space_lg"
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Start a challenge with accepted friends — e.g. 7 days, no reels."
+                android:layout_marginTop="6dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
+
+            <Button
+                android:id="@+id/btnStartChallenge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Start a challenge"
+                android:textColor="@color/text_primary"
+                android:background="@drawable/button_primary"
+                android:layout_marginTop="@dimen/space_md" />
+
+            <LinearLayout
+                android:id="@+id/layoutChallenges"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="@dimen/space_sm"/>
         </LinearLayout>
 
         <!-- Commitment Lock Card: ratchet controls (loosen delay + lock date) -->
