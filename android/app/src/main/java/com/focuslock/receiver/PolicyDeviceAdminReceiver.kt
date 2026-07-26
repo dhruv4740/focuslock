@@ -18,10 +18,12 @@ class PolicyDeviceAdminReceiver : DeviceAdminReceiver() {
     }
 
     override fun onDisableRequested(context: Context, intent: Intent): CharSequence? {
+        // Android grants disable once the user confirms this dialog — this message
+        // cannot actually block that, so it must not claim otherwise.
         val prefs = context.getSharedPreferences("FocusLockPrefs", Context.MODE_PRIVATE)
         val isBlocked = prefs.getBoolean("is_currently_blocked", false)
         if (isBlocked) {
-            return "WARNING: FocusLock is currently enforcing active limits! You cannot deactivate the protection until your session ends."
+            return "Disabling this will remove FocusLock's ability to enforce your limits, including the active session right now. Do this only if you mean to stop being protected."
         }
         return super.onDisableRequested(context, intent)
     }

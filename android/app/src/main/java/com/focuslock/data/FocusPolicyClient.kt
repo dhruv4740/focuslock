@@ -352,6 +352,21 @@ object FocusPolicyClient {
             )
         )
 
+        // Hour-of-day bucket for the Insights heatmap. Keyed by the LOCAL hour
+        // this usage was attributed to (same local-date convention as `date`
+        // above) — opportunistic increment alongside the existing usedMinutes
+        // write, not a new write path. Bounded growth: at most 24 keys per
+        // usage_days/{date} doc, and each date is already its own doc (same as
+        // usedMinutes/opensToday/perApp), so no extra retention cap is needed —
+        // it grows exactly as fast as the existing daily-doc scheme already does.
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        Tasks.await(
+            usageRef.set(
+                mapOf("hourlyMinutes" to mapOf(hour.toString() to FieldValue.increment(durationMinutes))),
+                SetOptions.merge()
+            )
+        )
+
         val eventData = mapOf(
             "type" to "usage",
             "target" to target,
@@ -364,6 +379,39 @@ object FocusPolicyClient {
         )
 
         Log.i(TAG, "Synced %.2f min for $target".format(durationMinutes))
+    }
+
+    // Retention: `events` is written every session and nothing ever reads it back
+    // (usage_days holds the aggregates dashboards actually use), so it grows
+    // unbounded with no cap otherwise. Matches the 90-day window used for
+    // usage_days pruning consideration (see AppUsageStore's KEEP_DAYS doc comment
+    // for why the *local* cache uses a much shorter 7-day window instead — that's
+    // a different, much smaller, offline-only store). Bounded query + single
+    // batch (Firestore batches cap at 500 writes) — cheap enough to call every
+    // time this already-once-a-day maintenance block runs; a no-op once caught up.
+    private const val EVENTS_RETENTION_DAYS = 90L
+    private const val EVENTS_PRUNE_BATCH_LIMIT = 200L
+
+    fun pruneOldEvents() {
+        try {
+            val cutoff = java.time.Instant.now()
+                .minus(EVENTS_RETENTION_DAYS, java.time.temporal.ChronoUnit.DAYS)
+                .toString()
+            val staleDocs = Tasks.await(
+                db.collection("users").document(userId).collection("events")
+                    .whereLessThan("timestamp", cutoff)
+                    .limit(EVENTS_PRUNE_BATCH_LIMIT)
+                    .get()
+            )
+            if (staleDocs.isEmpty) return
+            val batch = db.batch()
+            for (doc in staleDocs.documents) batch.delete(doc.reference)
+            Tasks.await(batch.commit())
+            Log.i(TAG, "Pruned ${staleDocs.size()} stale events doc(s)")
+        } catch (e: Exception) {
+            // Best-effort maintenance; never let pruning failure break the caller.
+            Log.w(TAG, "Event pruning failed", e)
+        }
     }
 
     // ── Stats ─────────────────────────────────────────────────────────────────
@@ -396,6 +444,28 @@ object FocusPolicyClient {
         @Suppress("UNCHECKED_CAST")
         val raw = snap.data?.get("reelCounts") as? Map<String, Number> ?: emptyMap()
         return raw.mapValues { it.value.toInt() }
+    }
+
+    /** Hour(0-23) -> minutes for [date], from the hourlyMinutes bucket written opportunistically in [postEvent]. Missing hours are simply absent, not zero-filled. */
+    fun getHourlyMinutes(date: String): Map<Int, Double> {
+        val snap = Tasks.await(
+            db.collection("users").document(userId)
+                .collection("usage_days").document(date).get()
+        )
+        @Suppress("UNCHECKED_CAST")
+        val raw = snap.data?.get("hourlyMinutes") as? Map<String, Number> ?: emptyMap()
+        return raw.mapNotNull { (k, v) -> k.toIntOrNull()?.let { it to v.toDouble() } }.toMap()
+    }
+
+    /** Per-package minutes for [date], from the perApp aggregate written in [postEvent]. */
+    fun getPerApp(date: String): Map<String, Double> {
+        val snap = Tasks.await(
+            db.collection("users").document(userId)
+                .collection("usage_days").document(date).get()
+        )
+        @Suppress("UNCHECKED_CAST")
+        val raw = snap.data?.get("perApp") as? Map<String, Number> ?: emptyMap()
+        return raw.mapValues { it.value.toDouble() }
     }
 
     // One lightweight write per flush (see SurfaceBlocker) rather than a
@@ -806,8 +876,11 @@ object FocusPolicyClient {
 
     data class DayUsage(val date: String, val label: String, val usedMinutes: Double)
 
-    fun getUsageWeek(): List<DayUsage> {
-        val today = java.time.LocalDate.now()
+    fun getUsageWeek(): List<DayUsage> = getUsageWeek(weeksAgo = 0)
+
+    /** Same 7-day window as [getUsageWeek] but shifted back by [weeksAgo] whole weeks (1 = the week before this one) — used for the Insights week-over-week trend. */
+    fun getUsageWeek(weeksAgo: Int): List<DayUsage> {
+        val today = java.time.LocalDate.now().minusWeeks(weeksAgo.toLong())
         val dayNames = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
         val dates = (6 downTo 0).map { daysAgo -> today.minusDays(daysAgo.toLong()) }
         val dateStrs = dates.map { it.toString() }

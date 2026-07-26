@@ -14,6 +14,17 @@ import org.json.JSONObject
  * Storage: one SharedPreferences string per date, a JSON object {pkg: minutes};
  * dates older than [KEEP_DAYS] are pruned on write. Serialization is factored
  * into pure functions for JVM tests.
+ *
+ * Retention vs. Firestore's usage_days: intentionally different windows, not an
+ * oversight. This store exists only to serve the 1 Hz on-device badge without a
+ * network round trip, so a short local cache is the right call — anything older
+ * is irrelevant to "today's" UI and would just be dead SharedPreferences bloat.
+ * Firestore's usage_days is the durable long-term record (dashboards, streaks,
+ * Insights heatmap all read it) and is kept indefinitely: it's one small doc per
+ * calendar day per user (~365/year), so unbounded growth there is negligible —
+ * unlike FocusPolicyClient's `events` subcollection, which is written every
+ * session and is bounded-pruned for exactly that reason (see
+ * FocusPolicyClient.pruneOldEvents).
  */
 object AppUsageStore {
 

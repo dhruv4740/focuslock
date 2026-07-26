@@ -103,6 +103,26 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:layout_marginTop="@dimen/space_md" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/border_color"
+                android:layout_marginVertical="14dp"
+                android:importantForAccessibility="no" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="TODAY BY APP"
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
+
+            <LinearLayout
+                android:id="@+id/layoutPerApp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="@dimen/space_md" />
         </LinearLayout>
 
         <!-- Todo List Card -->
@@ -716,6 +736,15 @@
                 android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
                 </LinearLayout>
 
+                <Button
+                    android:id="@+id/btnPickInstalledApps"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Pick from installed apps"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:background="@drawable/button_secondary"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+
                 <LinearLayout
                     android:id="@+id/layoutTargetApps"
                     android:layout_width="match_parent"
@@ -843,6 +872,105 @@
                     android:visibility="gone"
                 android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Accent"/>
             </LinearLayout>
+        </LinearLayout>
+
+    </LinearLayout>
+    </ScrollView>
+
+    <!-- Insights screen: trends, heatmap, reels/unlock, best/worst day -->
+    <ScrollView
+        android:id="@+id/screenInsights"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none"
+        android:visibility="gone">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Insights"
+            android:layout_marginBottom="@dimen/space_lg"
+            android:textAppearance="@style/TextAppearance.FocusLock.Display"/>
+
+        <!-- Hour-of-day heatmap -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="@dimen/card_padding"
+            android:layout_marginBottom="@dimen/space_lg">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="WHEN YOU USE TARGET APPS"
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
+
+            <LinearLayout
+                android:id="@+id/layoutHourlyHeatmap"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="@dimen/space_md" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="12am                                              12pm                                             11pm"
+                android:layout_marginTop="4dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label.Secondary"/>
+        </LinearLayout>
+
+        <!-- Summary stats -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="@dimen/card_padding"
+            android:layout_marginBottom="@dimen/space_lg">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="THIS WEEK"
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
+
+            <TextView
+                android:id="@+id/txtWeekTrend"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Loading…"
+                android:layout_marginTop="@dimen/space_xs"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
+
+            <TextView
+                android:id="@+id/txtWorstHour"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
+
+            <TextView
+                android:id="@+id/txtReelsPerUnlock"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
+
+            <TextView
+                android:id="@+id/txtBestWorstDay"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
         </LinearLayout>
 
     </LinearLayout>

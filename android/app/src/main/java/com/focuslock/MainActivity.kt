@@ -298,6 +298,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (!OnboardingActivity.isComplete(this)) {
+            startActivity(Intent(this, OnboardingActivity::class.java))
+            finish()
+            return
+        }
+
         setContentView(R.layout.activity_main)
 
         statusText = findViewById(R.id.txtStatus)
@@ -443,6 +450,7 @@ class MainActivity : AppCompatActivity() {
         val screens = mapOf(
             R.id.navHome to findViewById<View>(R.id.screenHome),
             R.id.navRules to findViewById<View>(R.id.screenRules),
+            R.id.navInsights to findViewById<View>(R.id.screenInsights),
             R.id.navSettings to findViewById<View>(R.id.screenSettings)
         )
         findViewById<BottomNavigationView>(R.id.bottomNav).setOnItemSelectedListener { item ->
@@ -733,6 +741,10 @@ class MainActivity : AppCompatActivity() {
             renderBlockWindows()
         }
 
+        findViewById<Button>(R.id.btnPickInstalledApps).setOnClickListener {
+            showInstalledAppsPicker()
+        }
+
         // Each Save button writes only its own card's fields (merge write) — the
         // Reels card can no longer clobber Blocking-Rules edits and vice versa,
         // and neither touches fields the Windows dashboard owns (targetDomains).
@@ -856,6 +868,60 @@ class MainActivity : AppCompatActivity() {
                 // leave fields empty, user can fill in
             }
         }.start()
+    }
+
+    // ── Installed-apps picker (Rules → Blocked Apps) ─────────────────────────
+    //
+    // Real app picker instead of typing raw package names: enumerates
+    // launchable apps via queryIntentActivities(MAIN/LAUNCHER) — the minimal
+    // query shape on API 30+ (see the <queries> block in AndroidManifest.xml)
+    // rather than QUERY_ALL_PACKAGES, which is a Play-review flag this app has
+    // no use for since it's never distributed through the Play Store. Writes
+    // into the same currentPolicy.targetApps/appModes in-memory state the
+    // manual "Add" button already uses — no new storage format.
+
+    private data class InstalledApp(val packageName: String, val label: String)
+
+    private fun listLaunchableApps(): List<InstalledApp> {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val resolveInfos = packageManager.queryIntentActivities(intent, 0)
+        return resolveInfos
+            .map { InstalledApp(it.activityInfo.packageName, it.loadLabel(packageManager).toString()) }
+            .filter { it.packageName != packageName }
+            .distinctBy { it.packageName }
+            .sortedBy { it.label.lowercase() }
+    }
+
+    private fun showInstalledAppsPicker() {
+        val policy = currentPolicy
+        if (policy == null) {
+            Toast.makeText(this, "Policy still loading — try again in a moment", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val apps = listLaunchableApps()
+        if (apps.isEmpty()) {
+            Toast.makeText(this, "No installed apps found", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val labels = apps.map { "${it.label}\n${it.packageName}" }.toTypedArray()
+        val checked = apps.map { it.packageName in policy.targetApps }.toBooleanArray()
+        AlertDialog.Builder(this)
+            .setTitle("Pick apps to manage")
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked -> checked[which] = isChecked }
+            .setPositiveButton("Add selected") { _, _ ->
+                val toAdd = apps.filterIndexed { i, app -> checked[i] && app.packageName !in policy.targetApps }
+                if (toAdd.isEmpty()) return@setPositiveButton
+                currentPolicy = currentPolicy?.let { p ->
+                    p.copy(
+                        targetApps = p.targetApps + toAdd.map { it.packageName },
+                        appModes = p.appModes + toAdd.associate { it.packageName to AppMode.LIMIT.wire }
+                    )
+                }
+                renderTargetApps()
+                Toast.makeText(this, "Added ${toAdd.size} app(s) — tap Save Policy to persist", Toast.LENGTH_LONG).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     // ── Sync Code ─────────────────────────────────────────────────────────────
@@ -1950,6 +2016,14 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 // Best-effort; the next resume retries.
             }
+            try {
+                // Bounded events pruning (see FocusPolicyClient.pruneOldEvents doc)
+                // — reuses this same infrequent maintenance touchpoint rather than
+                // adding a dedicated timer; safe to no-op if already caught up.
+                FocusPolicyClient.pruneOldEvents()
+            } catch (e: Exception) {
+                // Best-effort; the next resume retries.
+            }
         }.start()
     }
 
@@ -2045,6 +2119,159 @@ class MainActivity : AppCompatActivity() {
 
         loadTodos()
         loadWeeklyChart()
+        loadPerAppBreakdown()
+        loadInsights()
+    }
+
+    // ── Per-app breakdown (Home stats card) ──────────────────────────────────
+
+    private fun loadPerAppBreakdown() {
+        val layoutPerApp = findViewById<LinearLayout>(R.id.layoutPerApp)
+        Thread {
+            try {
+                val perApp = FocusPolicyClient.getPerApp(LocalDate.now().toString())
+                    .filterValues { it > 0.0 }
+                    .toList()
+                    .sortedByDescending { it.second }
+                postToUi {
+                    layoutPerApp.removeAllViews()
+                    if (perApp.isEmpty()) {
+                        layoutPerApp.addView(TextView(this).apply {
+                            text = "No app usage recorded yet today"
+                            setTextColor(getColor(R.color.text_secondary))
+                            textSize = 13f
+                        })
+                        return@postToUi
+                    }
+                    for ((pkg, minutes) in perApp) {
+                        layoutPerApp.addView(TextView(this).apply {
+                            text = "$pkg — ${"%.1f".format(minutes)} min"
+                            setTextColor(getColor(R.color.text_secondary))
+                            textSize = 13f
+                            setPadding(0, 2, 0, 2)
+                        })
+                    }
+                }
+            } catch (e: Exception) {
+                postToUi {
+                    layoutPerApp.removeAllViews()
+                    layoutPerApp.addView(TextView(this).apply {
+                        text = "Could not load per-app breakdown"
+                        setTextColor(getColor(R.color.text_secondary))
+                        textSize = 13f
+                    })
+                }
+            }
+        }.start()
+    }
+
+    // ── Insights screen ───────────────────────────────────────────────────────
+    //
+    // Uses only data already recorded (getUsageWeek ×2 for week-over-week,
+    // getHourlyMinutes for the heatmap, getStats/getReelCounts per day for
+    // reels-per-unlock — 7 extra reads, one per day of the current week; not
+    // batched since usage_days doesn't currently expose a batched
+    // opens/reelCounts read the way getUsageWeek batches usedMinutes).
+    // InsightsCalculator (data/InsightsCalculator.kt) does the actual math and
+    // is unit-tested separately.
+
+    private fun loadInsights() {
+        Thread {
+            try {
+                val thisWeek = FocusPolicyClient.getUsageWeek(weeksAgo = 0)
+                val lastWeek = FocusPolicyClient.getUsageWeek(weeksAgo = 1)
+                val trend = com.focuslock.data.InsightsCalculator.weekOverWeekTrend(thisWeek, lastWeek)
+                val bestWorst = com.focuslock.data.InsightsCalculator.bestAndWorstDay(thisWeek)
+
+                val hourlyByDay = thisWeek.map { day ->
+                    try { FocusPolicyClient.getHourlyMinutes(day.date) } catch (e: Exception) { emptyMap() }
+                }
+                val mergedHourly = com.focuslock.data.InsightsCalculator.mergeHourly(hourlyByDay)
+                val worstHour = com.focuslock.data.InsightsCalculator.worstHour(hourlyByDay)
+
+                var reelsTotal = 0
+                var opensTotal = 0
+                for (day in thisWeek) {
+                    try {
+                        val stats = FocusPolicyClient.getStats(day.date)
+                        opensTotal += stats.optInt("opensToday", 0)
+                        val reelCounts = stats.optJSONObject("reelCounts")
+                        reelCounts?.keys()?.forEach { key -> reelsTotal += reelCounts.optInt(key, 0) }
+                    } catch (e: Exception) {
+                        // skip this day, keep summing the rest
+                    }
+                }
+                val reelsPerUnlock = com.focuslock.data.InsightsCalculator.reelsPerUnlock(reelsTotal, opensTotal)
+
+                postToUi {
+                    renderHeatmap(mergedHourly)
+
+                    val deltaSign = if (trend.deltaMinutes >= 0) "+" else ""
+                    findViewById<TextView>(R.id.txtWeekTrend).text =
+                        "${"%.0f".format(trend.thisWeekMinutes)} min this week vs " +
+                        "${"%.0f".format(trend.lastWeekMinutes)} min last week " +
+                        "($deltaSign${"%.0f".format(trend.deltaMinutes)} min)"
+
+                    findViewById<TextView>(R.id.txtWorstHour).text = if (worstHour != null)
+                        "Your worst hour: ${formatHourLabel(worstHour)}"
+                    else
+                        "Your worst hour: not enough data yet"
+
+                    findViewById<TextView>(R.id.txtReelsPerUnlock).text = if (reelsPerUnlock != null)
+                        "Reels per unlock: ${"%.1f".format(reelsPerUnlock)}"
+                    else
+                        "Reels per unlock: no opens recorded this week"
+
+                    findViewById<TextView>(R.id.txtBestWorstDay).text = buildString {
+                        bestWorst.best?.let { append("Best day: ${it.label} (${"%.0f".format(it.usedMinutes)} min)") }
+                        bestWorst.worst?.let {
+                            if (isNotEmpty()) append("\n")
+                            append("Worst day: ${it.label} (${"%.0f".format(it.usedMinutes)} min)")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                postToUi {
+                    findViewById<TextView>(R.id.txtWeekTrend).text = "Could not load insights"
+                }
+            }
+        }.start()
+    }
+
+    private fun formatHourLabel(hour: Int): String = when {
+        hour == 0 -> "12am"
+        hour < 12 -> "${hour}am"
+        hour == 12 -> "12pm"
+        else -> "${hour - 12}pm"
+    }
+
+    private fun renderHeatmap(hourly: Map<Int, Double>) {
+        val layoutHeatmap = findViewById<LinearLayout>(R.id.layoutHourlyHeatmap)
+        layoutHeatmap.removeAllViews()
+        val maxMinutes = hourly.values.maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
+        for (hour in 0..23) {
+            val minutes = hourly[hour] ?: 0.0
+            val intensity = (minutes / maxMinutes).coerceIn(0.0, 1.0)
+            val cell = View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(0, (24 * resources.displayMetrics.density).toInt(), 1f).apply {
+                    if (hour > 0) marginStart = 1
+                }
+                contentDescription = "${formatHourLabel(hour)}: ${"%.0f".format(minutes)} minutes"
+                setBackgroundColor(heatmapColorFor(intensity))
+            }
+            layoutHeatmap.addView(cell)
+        }
+    }
+
+    /** Blends from a dim base to the accent color as intensity (0..1) rises — plain View coloring, no chart library. */
+    private fun heatmapColorFor(intensity: Double): Int {
+        val accent = getColor(R.color.color_accent)
+        val base = getColor(R.color.border_color)
+        val a = (android.graphics.Color.alpha(base) + (android.graphics.Color.alpha(accent) - android.graphics.Color.alpha(base)) * intensity).toInt()
+        val r = (android.graphics.Color.red(base) + (android.graphics.Color.red(accent) - android.graphics.Color.red(base)) * intensity).toInt()
+        val g = (android.graphics.Color.green(base) + (android.graphics.Color.green(accent) - android.graphics.Color.green(base)) * intensity).toInt()
+        val b = (android.graphics.Color.blue(base) + (android.graphics.Color.blue(accent) - android.graphics.Color.blue(base)) * intensity).toInt()
+        return android.graphics.Color.argb(a, r, g, b)
     }
 
     // ── Weekly Chart ──────────────────────────────────────────────────────────

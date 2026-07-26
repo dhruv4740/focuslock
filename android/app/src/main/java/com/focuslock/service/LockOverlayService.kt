@@ -166,6 +166,7 @@ class LockOverlayService : Service() {
 
             // Fetch and display today's usage stats
             val txtStats = overlayView?.findViewById<TextView>(R.id.txtOverlayStats)
+            val btnRequestExtension = overlayView?.findViewById<Button>(R.id.btnOverlayRequestExtension)
             networkExecutor.submit {
                 try {
                     val statsJson = FocusPolicyClient.getStats(LocalDate.now().toString())
@@ -179,6 +180,15 @@ class LockOverlayService : Service() {
                     Handler(Looper.getMainLooper()).post {
                         txtStats?.text = "Stats offline"
                     }
+                }
+
+                try {
+                    val extMinutes = FocusPolicyClient.getPolicy().extensionMinutes
+                    Handler(Looper.getMainLooper()).post {
+                        btnRequestExtension?.text = "Request $extMinutes Minute Extension"
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to load policy for extension button label", e)
                 }
             }
 

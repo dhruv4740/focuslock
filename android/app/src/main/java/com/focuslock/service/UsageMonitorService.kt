@@ -29,6 +29,8 @@ class UsageMonitorService : Service() {
         private const val TAG = "UsageMonitorService"
         private const val CHANNEL_ID_MONITOR_LEGACY = "focuslock-monitor"
         private const val CHANNEL_ID_ALERTS = "focuslock-alerts"
+        private const val CHANNEL_ID_MONITOR = "focuslock-monitor-fgs"
+        private const val NOTIFICATION_MONITOR_ID = 1001
         private const val NOTIFICATION_ALERT_ID = 1102
         private const val NOTIFICATION_OVERLAY_PERM_ID = 1103
         private const val NOTIFICATION_LIMIT_REACHED_ID = 1104
@@ -199,6 +201,7 @@ class UsageMonitorService : Service() {
         FocusPolicyClient.init(this)
         SurfaceBlocker.init(this)
         createNotificationChannels()
+        startMonitorForeground()
         restorePersistedShadowState()
         checkHeartbeatGapOnStart()
 
@@ -885,13 +888,45 @@ class UsageMonitorService : Service() {
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-            // The monitor no longer runs as a foreground service and posts no
-            // notification of its own — drop the channel so upgrading users don't
-            // keep a dead entry in system notification settings.
+            // Superseded by CHANNEL_ID_MONITOR below — drop the old entry so
+            // upgrading users don't keep a dead channel in system settings.
             mgr.deleteNotificationChannel(CHANNEL_ID_MONITOR_LEGACY)
             mgr.createNotificationChannel(
                 NotificationChannel(CHANNEL_ID_ALERTS, "FocusLock Alerts", NotificationManager.IMPORTANCE_HIGH)
             )
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID_MONITOR,
+                    "FocusLock Monitoring",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Persistent notice that FocusLock is actively monitoring app usage"
+                }
+            )
+        }
+    }
+
+    // Promotes this service to foreground so OEM background-kill policies are far
+    // less likely to tear it down silently (accessibility-service rebind is the
+    // only other lifeline). Required on API 34+ to declare a foregroundServiceType;
+    // dataSync fits since this service's job is syncing usage/policy state with
+    // Firestore in the background.
+    private fun startMonitorForeground() {
+        val notification = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID_MONITOR)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("FocusLock is monitoring app usage")
+            .setContentText("Enforcing your focus limits in the background.")
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_MONITOR_ID,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            startForeground(NOTIFICATION_MONITOR_ID, notification)
         }
     }
 }

@@ -9,6 +9,10 @@
         android:title="Rules"
         android:icon="@drawable/ic_nav_rules" />
     <item
+        android:id="@+id/navInsights"
+        android:title="Insights"
+        android:icon="@drawable/ic_nav_insights" />
+    <item
         android:id="@+id/navSettings"
         android:title="Settings"
         android:icon="@drawable/ic_nav_settings" />

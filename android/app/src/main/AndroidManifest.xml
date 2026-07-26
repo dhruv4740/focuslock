@@ -8,6 +8,20 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- Lets queryIntentActivities() (the Rules "Pick from installed apps" picker)
+         see other launchable apps on API 30+. This is the minimal, correct-shaped
+         query for that use case — QUERY_ALL_PACKAGES is a Play-review-gated
+         alternative that isn't needed here since this app is never distributed
+         through the Play Store. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -25,6 +39,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".OnboardingActivity"
+            android:exported="false" />
 
         <service
             android:name=".service.FocusAccessibilityService"
@@ -55,7 +73,8 @@
 
         <service
             android:name=".service.UsageMonitorService"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <service
             android:name=".service.LockOverlayService"
