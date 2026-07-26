@@ -26,9 +26,17 @@ class OnboardingActivity : AppCompatActivity() {
         const val PREFS_NAME = "FocusLockPrefs"
         const val PREF_ONBOARDING_COMPLETE = "onboarding_complete"
 
-        fun isComplete(context: Context): Boolean =
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(PREF_ONBOARDING_COMPLETE, false)
+        /**
+         * An install that already has a sync code counts as onboarded even
+         * without the flag — it predates onboarding existing. Without this,
+         * every user upgrading from <= 0.6.0 gets shown the first-run screen
+         * as if their configured install were brand new.
+         */
+        fun isComplete(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            if (prefs.getBoolean(PREF_ONBOARDING_COMPLETE, false)) return true
+            return !prefs.getString("sync_id", null).isNullOrBlank()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
