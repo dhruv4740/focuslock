@@ -50,6 +50,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var layoutTodoList: LinearLayout
     private lateinit var editFocusDuration: EditText
     private lateinit var editSyncId: EditText
+    private lateinit var txtMyFriendCode: TextView
+    private lateinit var editFriendCode: EditText
+    private lateinit var layoutFriendships: LinearLayout
 
     // Policy editor fields
     private lateinit var editDailyLimit: EditText
@@ -252,6 +255,9 @@ class MainActivity : AppCompatActivity() {
         layoutTodoList = findViewById(R.id.layoutTodoList)
         editFocusDuration = findViewById(R.id.editFocusDuration)
         editSyncId = findViewById(R.id.editSyncId)
+        txtMyFriendCode = findViewById(R.id.txtMyFriendCode)
+        editFriendCode = findViewById(R.id.editFriendCode)
+        layoutFriendships = findViewById(R.id.layoutFriendships)
 
         editDailyLimit = findViewById(R.id.editDailyLimit)
         editExtensionMins = findViewById(R.id.editExtensionMins)
@@ -277,6 +283,7 @@ class MainActivity : AppCompatActivity() {
 
         setupBottomNav()
         setupSyncCode()
+        setupIdentitySection()
         setupTodoSection()
         setupFocusSession()
         setupPolicyEditor()
@@ -858,6 +865,166 @@ class MainActivity : AppCompatActivity() {
         loadPolicyIntoEditor()
         refreshDashboardData()
         refreshPendingBanner()
+    }
+
+    // ── Identity & Friends ────────────────────────────────────────────────────
+    //
+    // Minimal plumbing UI only — a "Sign in with Google" button, your own
+    // friend code, a field to add someone else's, and a flat pending/accepted
+    // list. The leaderboard/streak features this lays groundwork for are out
+    // of scope for this pass.
+
+    private fun setupIdentitySection() {
+        findViewById<Button>(R.id.btnGoogleSignIn).setOnClickListener { btn ->
+            val webClientId = getString(R.string.google_oauth_web_client_id)
+            if (webClientId == "REPLACE_WITH_FIREBASE_WEB_CLIENT_ID") {
+                Toast.makeText(
+                    this,
+                    "Google sign-in isn't configured yet — google_oauth_web_client_id in strings.xml still has its placeholder value.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@setOnClickListener
+            }
+            btn.isEnabled = false
+            com.focuslock.data.GoogleAuthClient.signIn(this, webClientId) { result ->
+                result.onSuccess { idToken ->
+                    Thread {
+                        val linkResult = FocusPolicyClient.linkGoogleAccount(idToken)
+                        postToUi {
+                            btn.isEnabled = true
+                            if (linkResult.success) {
+                                Toast.makeText(this, "Signed in with Google", Toast.LENGTH_SHORT).show()
+                                refreshMyFriendCode()
+                            } else {
+                                Toast.makeText(this, linkResult.error ?: "Sign-in failed", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }.start()
+                }.onFailure { e ->
+                    postToUi {
+                        btn.isEnabled = true
+                        Toast.makeText(this, "Google sign-in failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+
+        findViewById<Button>(R.id.btnSendFriendRequest).setOnClickListener { btn ->
+            val rawCode = editFriendCode.text.toString()
+            if (!com.focuslock.data.FriendCode.isValid(rawCode)) {
+                Toast.makeText(this, "That doesn't look like a valid friend code.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            btn.isEnabled = false
+            Thread {
+                try {
+                    val profile = FocusPolicyClient.findProfileByFriendCode(rawCode)
+                    if (profile == null) {
+                        postToUi {
+                            btn.isEnabled = true
+                            Toast.makeText(this, "No user found with that friend code.", Toast.LENGTH_SHORT).show()
+                        }
+                        return@Thread
+                    }
+                    FocusPolicyClient.sendFriendRequest(profile.uid)
+                    postToUi {
+                        btn.isEnabled = true
+                        editFriendCode.setText("")
+                        Toast.makeText(this, "Friend request sent to ${profile.displayName.ifBlank { profile.friendCode }}", Toast.LENGTH_SHORT).show()
+                        refreshFriendships()
+                    }
+                } catch (e: Exception) {
+                    postToUi {
+                        btn.isEnabled = true
+                        Toast.makeText(this, "Couldn't send request: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }.start()
+        }
+
+        refreshMyFriendCode()
+        refreshFriendships()
+    }
+
+    private fun refreshMyFriendCode() {
+        Thread {
+            try {
+                var profile = FocusPolicyClient.getMyProfile()
+                if (profile == null) {
+                    // First time we have a real (linked or anonymous) uid —
+                    // create the profile doc so findProfileByFriendCode can
+                    // resolve it for others.
+                    profile = FocusPolicyClient.upsertMyProfile(displayName = "")
+                }
+                postToUi {
+                    txtMyFriendCode.text = "Your friend code: ${profile?.friendCode ?: "—"}"
+                }
+            } catch (e: Exception) {
+                // Not signed in yet, or offline — leave the placeholder.
+            }
+        }.start()
+    }
+
+    private fun refreshFriendships() {
+        Thread {
+            try {
+                val friendships = FocusPolicyClient.listFriendships()
+                postToUi { renderFriendships(friendships) }
+            } catch (e: Exception) {
+                // leave whatever was last rendered
+            }
+        }.start()
+    }
+
+    private fun renderFriendships(friendships: List<FocusPolicyClient.Friendship>) {
+        layoutFriendships.removeAllViews()
+        if (friendships.isEmpty()) {
+            layoutFriendships.addView(TextView(this).apply {
+                text = "No friends added yet"
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 13f
+            })
+            return
+        }
+        val myUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+        for (f in friendships) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                setPadding(0, 4, 0, 4)
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            val statusLabel = when {
+                f.status == FocusPolicyClient.FriendshipStatus.ACCEPTED -> "Friends"
+                f.requestedBy == myUid -> "Pending (sent)"
+                else -> "Pending (respond)"
+            }
+            val label = TextView(this).apply {
+                text = "${f.otherUid.take(8)}… — $statusLabel"
+                setTextColor(getColor(R.color.text_primary))
+                textSize = 13f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            row.addView(label)
+            if (f.status == FocusPolicyClient.FriendshipStatus.PENDING && f.requestedBy != myUid) {
+                val acceptBtn = Button(this).apply {
+                    text = "Accept"
+                    textSize = 12f
+                    setOnClickListener {
+                        isEnabled = false
+                        Thread {
+                            FocusPolicyClient.acceptFriendRequest(f.pairId)
+                            postToUi { refreshFriendships() }
+                        }.start()
+                    }
+                }
+                row.addView(acceptBtn)
+            }
+            layoutFriendships.addView(row)
+        }
     }
 
     private fun isValidTime(t: String): Boolean =

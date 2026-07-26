@@ -71,6 +71,11 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("com.google.firebase:firebase-firestore-ktx:24.10.0")
     implementation("com.google.firebase:firebase-auth-ktx:22.3.1")
+    // Modern Credential Manager API for Google Sign-In — NOT the deprecated
+    // GoogleSignInClient/play-services-auth flow, which Google is phasing out.
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
     testImplementation("junit:junit:4.13.2")
     // Real org.json impl for local unit tests — the Android SDK's org.json is a
     // stub that throws at runtime outside instrumented/Robolectric tests, and

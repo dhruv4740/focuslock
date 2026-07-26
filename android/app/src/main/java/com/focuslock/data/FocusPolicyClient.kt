@@ -6,6 +6,8 @@ import com.google.android.gms.tasks.Tasks
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
+import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.FieldPath
@@ -850,5 +852,187 @@ object FocusPolicyClient {
                 .collection("todos").document(todoId).delete()
         )
         return true
+    }
+
+    // ── Identity: Google linking ────────────────────────────────────────────
+
+    data class LinkResult(val success: Boolean, val error: String? = null)
+
+    /**
+     * Links a Google ID token onto the existing anonymous Firebase user so
+     * pre-existing sync-code data is preserved rather than replaced by a
+     * fresh account. If this Google account is already linked to a
+     * *different* Firebase user (FirebaseAuthUserCollisionException), that
+     * is surfaced as a clear error rather than swallowed or crashed on —
+     * merging the two accounts' data is out of scope for this pass.
+     */
+    fun linkGoogleAccount(idToken: String): LinkResult {
+        val auth = FirebaseAuth.getInstance()
+        val user = auth.currentUser ?: return LinkResult(false, "Not signed in yet — try again in a moment.")
+        val credential = GoogleAuthProvider.getCredential(idToken, null)
+        return try {
+            Tasks.await(user.linkWithCredential(credential))
+            Log.i(TAG, "Linked Google account onto uid=${user.uid}")
+            LinkResult(true)
+        } catch (e: FirebaseAuthUserCollisionException) {
+            Log.w(TAG, "Google account already linked to a different Firebase user", e)
+            LinkResult(false, "This Google account is already linked to a different FocusLock identity on another device.")
+        } catch (e: Exception) {
+            Log.e(TAG, "linkGoogleAccount failed", e)
+            LinkResult(false, e.message ?: "Sign-in failed.")
+        }
+    }
+
+    // ── Identity: profile + friend codes ────────────────────────────────────
+    //
+    // Design choice: `profiles/{uid}` as a TOP-LEVEL collection, not nested
+    // under `users/{syncId}/profile/{uid}`. Friends may be on entirely
+    // different sync-code trees (a sync code is a device-pairing secret, not
+    // an identity), so a friend lookup or friendship edge must be keyed by
+    // Firebase uid alone, independent of whichever sync tree either side
+    // happens to be using. Nesting under the sync tree would also mean two
+    // people on the *same* sync code collide on `profile/{uid}` for no
+    // reason, and would require a cross-tree read (denied by the current
+    // rules' membership check) just to look someone up by friend code.
+
+    data class Profile(val uid: String, val displayName: String, val friendCode: String)
+
+    private fun profilesCollection() = db.collection("profiles")
+
+    /** Creates or updates the caller's own profile doc. Safe to call repeatedly (merge write). */
+    fun upsertMyProfile(displayName: String): Profile? {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return null
+        val friendCode = FriendCode.generate(uid)
+        Tasks.await(
+            profilesCollection().document(uid).set(
+                mapOf(
+                    "displayName" to displayName,
+                    "friendCode" to friendCode,
+                    "updatedAt" to java.time.Instant.now().toString()
+                ),
+                SetOptions.merge()
+            )
+        )
+        return Profile(uid, displayName, friendCode)
+    }
+
+    fun getMyProfile(): Profile? {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return null
+        val snap = Tasks.await(profilesCollection().document(uid).get())
+        val data = snap.data ?: return null
+        return Profile(
+            uid = uid,
+            displayName = data["displayName"] as? String ?: "",
+            friendCode = data["friendCode"] as? String ?: FriendCode.generate(uid)
+        )
+    }
+
+    /** Looks up a profile by friend code (normalized). Returns null if no profile has that code. */
+    fun findProfileByFriendCode(rawCode: String): Profile? {
+        val code = FriendCode.normalize(rawCode)
+        if (!FriendCode.isValid(code)) return null
+        val snap = Tasks.await(
+            profilesCollection().whereEqualTo("friendCode", code).limit(1).get()
+        )
+        val doc = snap.documents.firstOrNull() ?: return null
+        return Profile(
+            uid = doc.id,
+            displayName = doc.getString("displayName") ?: "",
+            friendCode = code
+        )
+    }
+
+    // ── Identity: friendships ────────────────────────────────────────────────
+    //
+    // Modeled as a top-level `friendships/{pairId}` collection (pairId = the
+    // two uids sorted and joined with "_") rather than nested under a sync
+    // tree, for the same cross-tree reason as `profiles/{uid}` above, and
+    // because the sync tree's `members` array is explicitly capped at 5 and
+    // framed as "you + one trusted person" — a different trust model than an
+    // open-ended friends list.
+
+    enum class FriendshipStatus(val wire: String) {
+        PENDING("pending"), ACCEPTED("accepted");
+        companion object {
+            fun fromWire(wire: String) = values().firstOrNull { it.wire == wire } ?: PENDING
+        }
+    }
+
+    data class Friendship(
+        val pairId: String,
+        val uids: List<String>,
+        val status: FriendshipStatus,
+        val requestedBy: String,
+        val otherUid: String
+    )
+
+    private fun pairIdFor(uidA: String, uidB: String): String =
+        listOf(uidA, uidB).sorted().joinToString("_")
+
+    /** Sends a friend request to [targetUid]. No-op (returns existing) if a friendship already exists. */
+    fun sendFriendRequest(targetUid: String): Friendship {
+        val myUid = FirebaseAuth.getInstance().currentUser?.uid
+            ?: throw IllegalStateException("Not signed in")
+        val sortedUids = listOf(myUid, targetUid).sorted()
+        val pairId = pairIdFor(myUid, targetUid)
+        val ref = db.collection("friendships").document(pairId)
+        Tasks.await(db.runTransaction { tx ->
+            val snap = tx.get(ref)
+            if (!snap.exists()) {
+                tx.set(
+                    ref,
+                    mapOf(
+                        "uids" to sortedUids,
+                        "status" to FriendshipStatus.PENDING.wire,
+                        "requestedBy" to myUid,
+                        "createdAt" to java.time.Instant.now().toString()
+                    )
+                )
+            }
+            null
+        })
+        return Friendship(pairId, sortedUids, FriendshipStatus.PENDING, myUid, targetUid)
+    }
+
+    /**
+     * Accepts a pending friend request. Firestore rules additionally enforce
+     * that the caller cannot accept a request they themselves sent
+     * (no self-accept) — this client-side check just avoids an unnecessary
+     * round trip when that's already knowable locally.
+     */
+    fun acceptFriendRequest(pairId: String): Boolean {
+        val myUid = FirebaseAuth.getInstance().currentUser?.uid ?: return false
+        val ref = db.collection("friendships").document(pairId)
+        val snap = Tasks.await(ref.get())
+        val data = snap.data ?: return false
+        val requestedBy = data["requestedBy"] as? String ?: return false
+        if (requestedBy == myUid) {
+            Log.w(TAG, "Refusing to self-accept friend request $pairId")
+            return false
+        }
+        Tasks.await(ref.update("status", FriendshipStatus.ACCEPTED.wire))
+        return true
+    }
+
+    /** All friendships (pending and accepted) involving the caller. */
+    fun listFriendships(): List<Friendship> {
+        val myUid = FirebaseAuth.getInstance().currentUser?.uid ?: return emptyList()
+        val snap = Tasks.await(
+            db.collection("friendships")
+                .whereArrayContains("uids", myUid)
+                .get()
+        )
+        return snap.documents.mapNotNull { doc ->
+            @Suppress("UNCHECKED_CAST")
+            val uids = doc.get("uids") as? List<String> ?: return@mapNotNull null
+            val other = uids.firstOrNull { it != myUid } ?: return@mapNotNull null
+            Friendship(
+                pairId = doc.id,
+                uids = uids,
+                status = FriendshipStatus.fromWire(doc.getString("status") ?: "pending"),
+                requestedBy = doc.getString("requestedBy") ?: "",
+                otherUid = other
+            )
+        }
     }
 }

@@ -3,4 +3,16 @@
     <string name="app_name">FocusLock</string>
     <string name="device_admin_description">Prevents the uninstallation of FocusLock while blocking features are active.</string>
     <string name="accessibility_service_description">FocusLock uses this service to detect which app is in the foreground so it can enforce your focus rules and daily limits. If you enable Reels/Shorts blocking, it also reads on-screen element IDs inside Instagram and YouTube to detect those specific screens — it does not read your messages, photos, or content in other apps.</string>
+
+    <!--
+      REPLACE BEFORE GOOGLE SIGN-IN WILL WORK: this must be the Web client ID
+      (OAuth 2.0 client, type "Web application") from the Firebase console for
+      this project (focusblock-e8376) — Project settings > General >
+      "Web client (auto created by Google Service)" under
+      "Your project's OAuth 2.0 client IDs", or Google Cloud console >
+      APIs & Services > Credentials. It is NOT the Android client ID. Until
+      replaced, GoogleAuthClient's sign-in request will be rejected by
+      Google's servers with an invalid-client error.
+    -->
+    <string name="google_oauth_web_client_id">REPLACE_WITH_FIREBASE_WEB_CLIENT_ID</string>
 </resources>

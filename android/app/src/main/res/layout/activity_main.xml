@@ -1153,6 +1153,93 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- Identity / Friends Card: Google sign-in + friend code pairing. This
+             is groundwork for a future leaderboard, not the social feature UI
+             itself — kept minimal on purpose. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="@dimen/card_padding"
+            android:layout_marginBottom="@dimen/space_lg">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="IDENTITY &amp; FRIENDS"
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Sign in with Google to protect your account and share a friend code, independent of your sync code."
+                android:layout_marginTop="6dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
+
+            <Button
+                android:id="@+id/btnGoogleSignIn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Sign in with Google"
+                android:textColor="@color/text_primary"
+                android:background="@drawable/button_primary"
+                android:layout_marginTop="@dimen/space_md" />
+
+            <TextView
+                android:id="@+id/txtMyFriendCode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Your friend code: —"
+                android:layout_marginTop="@dimen/space_md"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="@dimen/space_md">
+
+                <EditText
+                    android:id="@+id/editFriendCode"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:hint="Friend's code"
+                    android:textColorHint="@color/text_secondary"
+                    android:inputType="textNoSuggestions|textCapCharacters"
+                    android:padding="10dp"
+                    android:background="@drawable/edittext_background"
+                    android:maxLines="1"
+                    android:contentDescription="Friend code"
+                    android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
+
+                <Button
+                    android:id="@+id/btnSendFriendRequest"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Add"
+                    android:textColor="@color/text_primary"
+                    android:background="@drawable/button_primary"
+                    android:layout_marginStart="@dimen/space_sm" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="FRIENDS"
+                android:layout_marginTop="@dimen/space_lg"
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
+
+            <LinearLayout
+                android:id="@+id/layoutFriendships"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="@dimen/space_sm"/>
+        </LinearLayout>
+
         <!-- Commitment Lock Card: ratchet controls (loosen delay + lock date) -->
         <LinearLayout
             android:layout_width="match_parent"
