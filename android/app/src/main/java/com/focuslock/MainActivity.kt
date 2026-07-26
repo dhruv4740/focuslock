@@ -168,6 +168,16 @@ class MainActivity : AppCompatActivity() {
                     val effectiveAt = PolicyRatchet.effectiveAtMs(now, guard.loosenDelayHours)
                     FocusPolicyClient.writePendingChange(effectiveAt, now, split.deferred, split.deferredChanges.map { it.summary })
                     message = "Stricter changes applied now. ${split.deferredChanges.size} change(s) that weaken your limits take effect in ${guard.loosenDelayHours}h."
+                    // Anti-cheat visibility signal (client-side only, per the plan):
+                    // log every loosened field so a friend's leaderboard view can show
+                    // "last loosened: X" — gaming is visible even without server validation.
+                    split.deferredChanges.forEach { change ->
+                        try {
+                            FocusPolicyClient.logPolicyChange(change.field, ChangeDirection.LOOSEN)
+                        } catch (e: Exception) {
+                            // Best-effort — a failed log write must never block the save itself.
+                        }
+                    }
                 }
 
                 startService(Intent(this, UsageMonitorService::class.java)
@@ -969,14 +979,48 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 val friendships = FocusPolicyClient.listFriendships()
-                postToUi { renderFriendships(friendships) }
+                // Leaderboard plumbing (flat list, no fancy UI): for each accepted
+                // friend, pull their streak/consistency entry and recent loosenings
+                // up front on this background thread — renderFriendships stays
+                // synchronous UI-thread work with data already in hand.
+                val leaderboard = mutableMapOf<String, FocusPolicyClient.LeaderboardEntry?>()
+                val recentLoosenings = mutableMapOf<String, FocusPolicyClient.PolicyChangeEntry?>()
+                for (f in friendships) {
+                    if (f.status != FocusPolicyClient.FriendshipStatus.ACCEPTED) continue
+                    leaderboard[f.otherUid] = try {
+                        FocusPolicyClient.getLeaderboardEntry(f.otherUid)
+                    } catch (e: Exception) { null }
+                    recentLoosenings[f.otherUid] = try {
+                        val cutoffMs = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+                        FocusPolicyClient.getRecentPolicyChanges(f.otherUid, limit = 5)
+                            .firstOrNull { entry ->
+                                try { java.time.Instant.parse(entry.timestamp).toEpochMilli() >= cutoffMs }
+                                catch (e: Exception) { false }
+                            }
+                    } catch (e: Exception) { null }
+                }
+                postToUi { renderFriendships(friendships, leaderboard, recentLoosenings) }
             } catch (e: Exception) {
                 // leave whatever was last rendered
             }
         }.start()
     }
 
-    private fun renderFriendships(friendships: List<FocusPolicyClient.Friendship>) {
+    private fun relativeTime(isoTimestamp: String): String {
+        val thenMs = try { java.time.Instant.parse(isoTimestamp).toEpochMilli() } catch (e: Exception) { return "recently" }
+        val diffMin = (System.currentTimeMillis() - thenMs) / 60_000
+        return when {
+            diffMin < 60 -> "${diffMin}m ago"
+            diffMin < 24 * 60 -> "${diffMin / 60}h ago"
+            else -> "${diffMin / (24 * 60)}d ago"
+        }
+    }
+
+    private fun renderFriendships(
+        friendships: List<FocusPolicyClient.Friendship>,
+        leaderboard: Map<String, FocusPolicyClient.LeaderboardEntry?> = emptyMap(),
+        recentLoosenings: Map<String, FocusPolicyClient.PolicyChangeEntry?> = emptyMap()
+    ) {
         layoutFriendships.removeAllViews()
         if (friendships.isEmpty()) {
             layoutFriendships.addView(TextView(this).apply {
@@ -988,13 +1032,20 @@ class MainActivity : AppCompatActivity() {
         }
         val myUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
         for (f in friendships) {
+            val column = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                setPadding(0, 4, 0, 4)
+            }
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 )
-                setPadding(0, 4, 0, 4)
                 gravity = android.view.Gravity.CENTER_VERTICAL
             }
             val statusLabel = when {
@@ -1023,7 +1074,27 @@ class MainActivity : AppCompatActivity() {
                 }
                 row.addView(acceptBtn)
             }
-            layoutFriendships.addView(row)
+            column.addView(row)
+
+            if (f.status == FocusPolicyClient.FriendshipStatus.ACCEPTED) {
+                val entry = leaderboard[f.otherUid]
+                val loosening = recentLoosenings[f.otherUid]
+                val statsText = if (entry != null) {
+                    "Streak ${entry.currentStreak} (best ${entry.longestStreak}) — " +
+                        "${entry.consistencyPercent.toInt()}% consistent"
+                } else {
+                    "No streak data yet"
+                }
+                val loosenText = if (loosening != null) {
+                    " · last loosened: ${loosening.field} ${relativeTime(loosening.timestamp)}"
+                } else ""
+                column.addView(TextView(this).apply {
+                    text = statsText + loosenText
+                    setTextColor(getColor(R.color.text_secondary))
+                    textSize = 12f
+                })
+            }
+            layoutFriendships.addView(column)
         }
     }
 
@@ -1525,6 +1596,16 @@ class MainActivity : AppCompatActivity() {
                 // delay itself — otherwise it only takes effect the next time the
                 // user happens to open the Settings screen's ratchet card.
                 FocusPolicyClient.applyDuePendingDelayChange()
+            } catch (e: Exception) {
+                // Best-effort; the next resume retries.
+            }
+            try {
+                // Once-per-day streak/leaderboard write. StreakTracker's own
+                // idempotency guard (lastRecordedDate >= today) makes repeat
+                // onResume calls within the same day a no-op, so no extra
+                // debouncing is needed here.
+                FocusPolicyClient.recordTodaysStreakOutcome()
+                postToUi { refreshFriendships() }
             } catch (e: Exception) {
                 // Best-effort; the next resume retries.
             }

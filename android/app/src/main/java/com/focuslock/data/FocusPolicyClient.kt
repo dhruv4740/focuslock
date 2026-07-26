@@ -1035,4 +1035,162 @@ object FocusPolicyClient {
             )
         }
     }
+
+    // ── Streak (per-day consistency, shared field names with the Windows agent) ─
+    //
+    // `streak/current` lives under the sync-code tree (users/{userId}/streak/
+    // current) — same doc both platforms read/write, per windows-agent/src/
+    // agent.js's recordStreakOutcome/checkDayRollover. Field names
+    // (currentStreak, longestStreak, lastSuccessDate, lastRecordedDate) match
+    // exactly so either platform can safely update the doc without clobbering
+    // the other's fields (merge-free `set` inside a transaction, same as
+    // Windows). metGoalDaysLast30/totalDaysLast30 are additive fields Android
+    // introduces for the leaderboard's consistencyPercent — Windows round-trips
+    // them untouched via its own merge writes elsewhere in this file's pattern.
+
+    private fun streakStateFromMap(data: Map<String, Any>): StreakTracker.StreakState =
+        StreakTracker.StreakState(
+            currentStreak = (data["currentStreak"] as? Number)?.toInt() ?: 0,
+            longestStreak = (data["longestStreak"] as? Number)?.toInt() ?: 0,
+            lastSuccessDate = data["lastSuccessDate"] as? String,
+            lastRecordedDate = data["lastRecordedDate"] as? String,
+            metGoalDaysLast30 = (data["metGoalDaysLast30"] as? Number)?.toInt() ?: 0,
+            totalDaysLast30 = (data["totalDaysLast30"] as? Number)?.toInt() ?: 0
+        )
+
+    private fun streakStateToMap(state: StreakTracker.StreakState): Map<String, Any> = mapOf(
+        "currentStreak" to state.currentStreak,
+        "longestStreak" to state.longestStreak,
+        "lastSuccessDate" to (state.lastSuccessDate ?: ""),
+        "lastRecordedDate" to (state.lastRecordedDate ?: ""),
+        "metGoalDaysLast30" to state.metGoalDaysLast30,
+        "totalDaysLast30" to state.totalDaysLast30
+    )
+
+    /**
+     * Records today's streak outcome once — call from a daily-boundary spot
+     * (MainActivity.onResume, alongside applyDuePendingChange). Reads
+     * usage_days/{today} + policy/global, computes effectiveLimit the same way
+     * PolicyEngine.decide does (dailyLimit + min(extensionsUsedToday,
+     * dailyExtensionLimit) * extensionMinutes, matching the Windows agent's
+     * computeEffectiveLimit in windows-agent/src/logic.js), then runs
+     * StreakTracker inside a Firestore transaction so a same-day race between
+     * Android and the Windows agent can't double-count — StreakTracker's own
+     * idempotency guard (lastRecordedDate >= today) makes the loser of the
+     * race a no-op. Also upserts this uid's leaderboards/current/entries doc.
+     *
+     * No backfill for elapsed offline days (unlike the Windows agent's 30-day
+     * catch-up in checkDayRollover) — out of scope for this slice; see the
+     * task report for the accuracy tradeoff.
+     */
+    fun recordTodaysStreakOutcome() {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val today = java.time.LocalDate.now().toString()
+
+        val policySnap = Tasks.await(
+            db.collection("users").document(userId).collection("policy").document("global").get()
+        )
+        val policy = policySnap.data ?: mapOf<String, Any>()
+        val dailyLimitMinutes = (policy["dailyLimitMinutes"] as? Number)?.toInt() ?: 0
+        val extensionMinutes = (policy["extensionMinutes"] as? Number)?.toInt() ?: 15
+        val dailyExtensionLimit = (policy["dailyExtensionLimit"] as? Number)?.toInt() ?: 1
+
+        val usageSnap = Tasks.await(
+            db.collection("users").document(userId).collection("usage_days").document(today).get()
+        )
+        val usage = usageSnap.data ?: mapOf<String, Any>()
+        val usedMinutes = usage["usedMinutes"] as? Double ?: 0.0
+        val extensionsUsedToday = (usage["extensionsUsedToday"] as? Number)?.toInt() ?: 0
+        val cappedExtensions = minOf(extensionsUsedToday, dailyExtensionLimit)
+        val effectiveLimit = dailyLimitMinutes + cappedExtensions * extensionMinutes
+
+        val streakRef = db.collection("users").document(userId).collection("streak").document("current")
+        val newState = Tasks.await(db.runTransaction { tx ->
+            val snap = tx.get(streakRef)
+            val prior = if (snap.exists()) streakStateFromMap(snap.data ?: emptyMap()) else StreakTracker.StreakState()
+            val next = StreakTracker.recordDay(usedMinutes, effectiveLimit, prior, today)
+            if (next != prior) tx.set(streakRef, streakStateToMap(next))
+            next
+        })
+
+        val myProfile = getMyProfile()
+        val consistencyPercent = if (newState.totalDaysLast30 > 0)
+            (newState.metGoalDaysLast30 * 100.0 / newState.totalDaysLast30) else 100.0
+        Tasks.await(
+            db.collection("leaderboards").document("current").collection("entries").document(uid).set(
+                mapOf(
+                    "displayName" to (myProfile?.displayName ?: ""),
+                    "currentStreak" to newState.currentStreak,
+                    "longestStreak" to newState.longestStreak,
+                    "consistencyPercent" to consistencyPercent,
+                    "updatedAt" to java.time.Instant.now().toString()
+                )
+            )
+        )
+    }
+
+    // ── Policy-change log (anti-cheat visibility signal) ─────────────────────
+    //
+    // Append-only: policy_changes/{uid}/{autoId}, keyed by uid (not the sync
+    // tree) for the same cross-tree reason as profiles/friendships — a friend
+    // viewing the leaderboard needs a uid-keyed path regardless of either
+    // side's sync code. Only LOOSEN directions are logged (the "gaming"
+    // signal per the plan) — tightenings are not visibility-relevant.
+
+    fun logPolicyChange(field: String, direction: ChangeDirection) {
+        if (direction != ChangeDirection.LOOSEN) return
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        Tasks.await(
+            db.collection("policy_changes").document(uid).collection("entries").add(
+                mapOf(
+                    "timestamp" to java.time.Instant.now().toString(),
+                    "direction" to "loosen",
+                    "field" to field
+                )
+            )
+        )
+    }
+
+    data class PolicyChangeEntry(val timestamp: String, val direction: String, val field: String)
+
+    /** Recent policy changes for [uid] — used by the leaderboard to show "last loosened: X". */
+    fun getRecentPolicyChanges(uid: String, limit: Int = 10): List<PolicyChangeEntry> {
+        val snap = Tasks.await(
+            db.collection("policy_changes").document(uid).collection("entries")
+                .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                .limit(limit.toLong())
+                .get()
+        )
+        return snap.documents.map { doc ->
+            PolicyChangeEntry(
+                timestamp = doc.getString("timestamp") ?: "",
+                direction = doc.getString("direction") ?: "",
+                field = doc.getString("field") ?: ""
+            )
+        }
+    }
+
+    // ── Leaderboard ───────────────────────────────────────────────────────────
+
+    data class LeaderboardEntry(
+        val uid: String,
+        val displayName: String,
+        val currentStreak: Int,
+        val longestStreak: Int,
+        val consistencyPercent: Double
+    )
+
+    fun getLeaderboardEntry(uid: String): LeaderboardEntry? {
+        val snap = Tasks.await(
+            db.collection("leaderboards").document("current").collection("entries").document(uid).get()
+        )
+        val data = snap.data ?: return null
+        return LeaderboardEntry(
+            uid = uid,
+            displayName = data["displayName"] as? String ?: "",
+            currentStreak = (data["currentStreak"] as? Number)?.toInt() ?: 0,
+            longestStreak = (data["longestStreak"] as? Number)?.toInt() ?: 0,
+            consistencyPercent = (data["consistencyPercent"] as? Number)?.toDouble() ?: 0.0
+        )
+    }
 }

@@ -90,5 +90,25 @@ service cloud.firestore {
       allow delete: if request.auth != null
         && request.auth.uid in resource.data.uids;
     }
+
+    // Append-only policy-change log (anti-cheat visibility signal — see the
+    // reel-counting plan Part E). Owner-writable, any-authenticated-friend-
+    // readable (same open-read pattern as profiles/{uid}: a friend code
+    // lookup or leaderboard view needs to resolve a stranger's entries before
+    // any friendship exists). No update/delete — a user cannot scrub their
+    // own loosening history.
+    match /policy_changes/{uid}/entries/{entryId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.auth.uid == uid;
+      allow update, delete: if false;
+    }
+
+    // Leaderboard entries: one doc per uid, written by that uid's own client
+    // whenever recordTodaysStreakOutcome() runs. Same open-read pattern as
+    // profiles/{uid} and policy_changes above.
+    match /leaderboards/current/entries/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
   }
 }
