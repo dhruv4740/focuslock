@@ -14,5 +14,5 @@
       replaced, GoogleAuthClient's sign-in request will be rejected by
       Google's servers with an invalid-client error.
     -->
-    <string name="google_oauth_web_client_id">REPLACE_WITH_FIREBASE_WEB_CLIENT_ID</string>
+    <string name="google_oauth_web_client_id">22012836707-vq83d3hnh6kptk0mkc0132d4a2lvloqr.apps.googleusercontent.com</string>
 </resources>
