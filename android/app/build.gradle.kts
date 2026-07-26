@@ -37,7 +37,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             if (hasReleaseKeystore) {
                 signingConfig = signingConfigs.getByName("release")
             }
