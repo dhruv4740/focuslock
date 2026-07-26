@@ -103,6 +103,41 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Accountability-partner approval requests (opt-in alternative/addition to
+    // the pure time-delay ratchet — see PolicyRatchet/ApprovalGate). Owner-
+    // keyed like policy_changes above, with a "requests" subcollection (not
+    // "entries") so a collectionGroup query over one name never mixes with
+    // policy_changes' "entries" documents, which lack partnerUid/status.
+    // Append-only: no delete, so a rejected/approved request stays as history.
+    match /approval_requests/{ownerUid}/requests/{requestId} {
+      allow read: if request.auth != null
+        && (request.auth.uid == ownerUid || request.auth.uid == resource.data.partnerUid);
+
+      // Only the owner can create their own request, and only in the pending
+      // state — a client can't pre-seed an approved/rejected doc.
+      allow create: if request.auth != null
+        && request.auth.uid == ownerUid
+        && request.resource.data.ownerUid == ownerUid
+        && request.resource.data.status == 'pending';
+
+      // Only the designated partner may respond, flipping pending -> approved
+      // or pending -> rejected, and nothing else about the doc may change
+      // (no self-approval: ownerUid != caller is implied since the partner
+      // field can't equal the owner's own uid for a legitimate request, but
+      // checked explicitly here too).
+      allow update: if request.auth != null
+        && ownerUid != request.auth.uid
+        && request.auth.uid == resource.data.partnerUid
+        && resource.data.status == 'pending'
+        && (request.resource.data.status == 'approved' || request.resource.data.status == 'rejected')
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.partnerUid == resource.data.partnerUid
+        && request.resource.data.summaries == resource.data.summaries
+        && request.resource.data.createdAt == resource.data.createdAt;
+
+      allow delete: if false;
+    }
+
     // Leaderboard entries: one doc per uid, written by that uid's own client
     // whenever recordTodaysStreakOutcome() runs. Same open-read pattern as
     // profiles/{uid} and policy_changes above.

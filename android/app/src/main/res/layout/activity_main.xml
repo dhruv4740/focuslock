@@ -1334,6 +1334,57 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- Accountability Partner Card: opt-in partner-approval alternative to the timer -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="@dimen/card_padding"
+            android:layout_marginBottom="@dimen/space_lg">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="ACCOUNTABILITY PARTNER"
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Optional: pick an accepted friend to gate your loosening changes instead of the timer above. When set, a loosening waits on their approval — not on the clock — and a rejection cancels it outright."
+                android:layout_marginTop="6dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
+
+            <Spinner
+                android:id="@+id/spinnerAccountabilityPartner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"/>
+
+            <TextView
+                android:id="@+id/txtMyPendingApproval"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:visibility="gone"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Requests waiting on you"
+                android:layout_marginTop="@dimen/space_md"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+
+            <LinearLayout
+                android:id="@+id/layoutIncomingApprovals"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="@dimen/space_sm"/>
+        </LinearLayout>
+
         <!-- Reel Detection Card (read-only diagnostics) -->
         <LinearLayout
             android:layout_width="match_parent"

@@ -129,6 +129,41 @@ class MainActivity : AppCompatActivity() {
      *   respecting) snapshot — never the raw requested `new`, so e.g. SurfaceBlocker
      *   is never told about a loosening before its delay has elapsed.
      */
+    /**
+     * Single funnel for writing a deferred loosening: if the caller has
+     * designated an accountability partner, approval REPLACES the timer
+     * entirely (see ApprovalGate's doc comment for why) — a partner-gated
+     * approval request is created instead of (not alongside) the plain
+     * countdown, and the returned message reflects that. Falls back to the
+     * existing pure-timer behavior, unchanged, when no partner is set.
+     * Called from every save path that can produce split.deferred != null.
+     */
+    private fun writePendingWithApproval(
+        effectiveAt: Long,
+        now: Long,
+        deferred: PolicySnapshot,
+        summaries: List<String>,
+        delayHours: Int
+    ): String {
+        val partnerUid = try {
+            FocusPolicyClient.getMyProfile()?.accountabilityPartnerUid
+        } catch (e: Exception) {
+            null
+        }
+        if (partnerUid != null) {
+            val requestId = FocusPolicyClient.createApprovalRequest(partnerUid, summaries)
+            FocusPolicyClient.writePendingChange(effectiveAt, now, deferred, summaries, approvalRequestId = requestId)
+            val partnerName = try {
+                FocusPolicyClient.getProfileByUid(partnerUid)?.displayName?.ifBlank { null }
+            } catch (e: Exception) {
+                null
+            } ?: partnerUid.take(8) + "…"
+            return "Waiting for $partnerName to approve ${summaries.size} change(s) that weaken your limits."
+        }
+        FocusPolicyClient.writePendingChange(effectiveAt, now, deferred, summaries)
+        return "${summaries.size} change(s) that weaken your limits take effect in ${delayHours}h."
+    }
+
     private fun saveViaRatchet(
         btn: View,
         confirmationView: TextView?,
@@ -166,8 +201,10 @@ class MainActivity : AppCompatActivity() {
                 var message = "Saved."
                 if (split.deferred != null) {
                     val effectiveAt = PolicyRatchet.effectiveAtMs(now, guard.loosenDelayHours)
-                    FocusPolicyClient.writePendingChange(effectiveAt, now, split.deferred, split.deferredChanges.map { it.summary })
-                    message = "Stricter changes applied now. ${split.deferredChanges.size} change(s) that weaken your limits take effect in ${guard.loosenDelayHours}h."
+                    val deferMsg = writePendingWithApproval(
+                        effectiveAt, now, split.deferred, split.deferredChanges.map { it.summary }, guard.loosenDelayHours
+                    )
+                    message = "Stricter changes applied now. $deferMsg"
                     // Anti-cheat visibility signal (client-side only, per the plan):
                     // log every loosened field so a friend's leaderboard view can show
                     // "last loosened: X" — gaming is visible even without server validation.
@@ -225,13 +262,18 @@ class MainActivity : AppCompatActivity() {
         card.visibility = View.VISIBLE
         findViewById<TextView>(R.id.txtPendingSummaries).text =
             pending.summaries.joinToString("\n") { "• $it" }
-        val remainingMs = (pending.effectiveAtMs - System.currentTimeMillis()).coerceAtLeast(0)
-        val remainingH = remainingMs / 3_600_000
-        val remainingM = (remainingMs / 60_000) % 60
-        findViewById<TextView>(R.id.txtPendingCountdown).text = if (remainingMs <= 0)
-            "Due — takes effect next time the app checks in"
-        else
-            "Takes effect in ${remainingH}h ${remainingM}m (${formatEpochMs(pending.effectiveAtMs)})"
+        if (pending.approvalRequestId != null) {
+            findViewById<TextView>(R.id.txtPendingCountdown).text =
+                "Waiting for your accountability partner to approve — no timer, their decision governs this change."
+        } else {
+            val remainingMs = (pending.effectiveAtMs - System.currentTimeMillis()).coerceAtLeast(0)
+            val remainingH = remainingMs / 3_600_000
+            val remainingM = (remainingMs / 60_000) % 60
+            findViewById<TextView>(R.id.txtPendingCountdown).text = if (remainingMs <= 0)
+                "Due — takes effect next time the app checks in"
+            else
+                "Takes effect in ${remainingH}h ${remainingM}m (${formatEpochMs(pending.effectiveAtMs)})"
+        }
         findViewById<Button>(R.id.btnCancelPending).setOnClickListener { btn ->
             btn.isEnabled = false
             Thread {
@@ -511,8 +553,9 @@ class MainActivity : AppCompatActivity() {
                         var message = "\"$name\" mode applied."
                         if (split.deferred != null) {
                             val effectiveAt = PolicyRatchet.effectiveAtMs(now, guard.loosenDelayHours)
-                            FocusPolicyClient.writePendingChange(effectiveAt, now, split.deferred, split.deferredChanges.map { it.summary })
-                            message += " ${split.deferredChanges.size} change(s) that weaken your limits take effect in ${guard.loosenDelayHours}h."
+                            message += " " + writePendingWithApproval(
+                                effectiveAt, now, split.deferred, split.deferredChanges.map { it.summary }, guard.loosenDelayHours
+                            )
                         }
 
                         startService(Intent(this, UsageMonitorService::class.java)
@@ -1314,8 +1357,9 @@ class MainActivity : AppCompatActivity() {
                         var toastMsg: String? = null
                         if (split.deferred != null) {
                             val effectiveAt = PolicyRatchet.effectiveAtMs(now, guard.loosenDelayHours)
-                            FocusPolicyClient.writePendingChange(effectiveAt, now, split.deferred, split.deferredChanges.map { it.summary })
-                            toastMsg = "Takes effect in ${guard.loosenDelayHours}h"
+                            toastMsg = this@MainActivity.writePendingWithApproval(
+                                effectiveAt, now, split.deferred, split.deferredChanges.map { it.summary }, guard.loosenDelayHours
+                            )
                         }
                         postToUi {
                             toastMsg?.let { Toast.makeText(this@MainActivity, it, Toast.LENGTH_SHORT).show() }
@@ -1370,8 +1414,9 @@ class MainActivity : AppCompatActivity() {
                         var toastMsg: String? = null
                         if (split.deferred != null) {
                             val effectiveAt = PolicyRatchet.effectiveAtMs(now, guard.loosenDelayHours)
-                            FocusPolicyClient.writePendingChange(effectiveAt, now, split.deferred, split.deferredChanges.map { it.summary })
-                            toastMsg = "Takes effect in ${guard.loosenDelayHours}h"
+                            toastMsg = this@MainActivity.writePendingWithApproval(
+                                effectiveAt, now, split.deferred, split.deferredChanges.map { it.summary }, guard.loosenDelayHours
+                            )
                         }
                         postToUi {
                             toastMsg?.let { Toast.makeText(this@MainActivity, it, Toast.LENGTH_SHORT).show() }
@@ -1400,6 +1445,8 @@ class MainActivity : AppCompatActivity() {
         val btnSaveDelay = findViewById<Button>(R.id.btnSaveLoosenDelay)
         val btnLock = findViewById<Button>(R.id.btnLockSettings)
         val btnClearLock = findViewById<Button>(R.id.btnClearLock)
+
+        setupAccountabilityPartner()
 
         fun refresh() {
             Thread {
@@ -1563,6 +1610,141 @@ class MainActivity : AppCompatActivity() {
                 }
             }.start()
         }
+    }
+
+    // ── Accountability partner (opt-in approval gate, Settings screen) ───────
+
+    private fun setupAccountabilityPartner() {
+        val spinner = findViewById<android.widget.Spinner>(R.id.spinnerAccountabilityPartner)
+        val txtMyPendingApproval = findViewById<TextView>(R.id.txtMyPendingApproval)
+        val layoutIncomingApprovals = findViewById<LinearLayout>(R.id.layoutIncomingApprovals)
+
+        // uid at index 0 is "None" (empty string sentinel).
+        var choiceUids: List<String> = listOf("")
+
+        fun refreshMyPendingApproval() {
+            Thread {
+                val request = try { FocusPolicyClient.getMyPendingApprovalRequest() } catch (e: Exception) { null }
+                postToUi {
+                    if (request == null) {
+                        txtMyPendingApproval.visibility = View.GONE
+                    } else {
+                        txtMyPendingApproval.visibility = View.VISIBLE
+                        txtMyPendingApproval.text = "Your own pending change: waiting on partner approval " +
+                            "(${request.summaries.size} change(s))."
+                    }
+                }
+            }.start()
+        }
+
+        fun refreshIncomingApprovals() {
+            Thread {
+                val requests = try { FocusPolicyClient.getPendingApprovalRequestsForMe() } catch (e: Exception) { emptyList() }
+                postToUi {
+                    layoutIncomingApprovals.removeAllViews()
+                    if (requests.isEmpty()) {
+                        layoutIncomingApprovals.addView(TextView(this).apply {
+                            text = "Nothing waiting on you"
+                            setTextColor(getColor(R.color.text_secondary))
+                            textSize = 13f
+                        })
+                        return@postToUi
+                    }
+                    for (req in requests) {
+                        val row = LinearLayout(this).apply {
+                            orientation = LinearLayout.VERTICAL
+                            layoutParams = LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT,
+                                LinearLayout.LayoutParams.WRAP_CONTENT
+                            )
+                            setPadding(0, 4, 0, 8)
+                        }
+                        row.addView(TextView(this).apply {
+                            text = req.summaries.joinToString("\n") { "• $it" }
+                            setTextColor(getColor(R.color.text_primary))
+                            textSize = 13f
+                        })
+                        val btnRow = LinearLayout(this).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            layoutParams = LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT,
+                                LinearLayout.LayoutParams.WRAP_CONTENT
+                            )
+                        }
+                        val btnApprove = Button(this).apply {
+                            text = "Approve"
+                            textSize = 12f
+                            setOnClickListener {
+                                isEnabled = false
+                                Thread {
+                                    try {
+                                        FocusPolicyClient.respondToApprovalRequest(req.ownerUid, req.requestId, approved = true)
+                                    } catch (e: Exception) { /* surfaced via refresh no-op */ }
+                                    postToUi { refreshIncomingApprovals() }
+                                }.start()
+                            }
+                        }
+                        val btnReject = Button(this).apply {
+                            text = "Reject"
+                            textSize = 12f
+                            setOnClickListener {
+                                isEnabled = false
+                                Thread {
+                                    try {
+                                        FocusPolicyClient.respondToApprovalRequest(req.ownerUid, req.requestId, approved = false)
+                                    } catch (e: Exception) { /* surfaced via refresh no-op */ }
+                                    postToUi { refreshIncomingApprovals() }
+                                }.start()
+                            }
+                        }
+                        btnRow.addView(btnApprove)
+                        btnRow.addView(btnReject)
+                        row.addView(btnRow)
+                        layoutIncomingApprovals.addView(row)
+                    }
+                }
+            }.start()
+        }
+
+        Thread {
+            val friendships = try { FocusPolicyClient.listFriendships() } catch (e: Exception) { emptyList() }
+            val accepted = friendships.filter { it.status == FocusPolicyClient.FriendshipStatus.ACCEPTED }
+            val myProfile = try { FocusPolicyClient.getMyProfile() } catch (e: Exception) { null }
+            postToUi {
+                choiceUids = listOf("") + accepted.map { it.otherUid }
+                val labels = listOf("None") + accepted.map { it.otherUid.take(8) + "…" }
+                val adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_spinner_item, labels)
+                adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+                spinner.adapter = adapter
+                val currentIndex = choiceUids.indexOf(myProfile?.accountabilityPartnerUid ?: "").coerceAtLeast(0)
+                spinner.setSelection(currentIndex)
+                spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    private var isFirstCallback = true
+                    override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                        if (isFirstCallback) { isFirstCallback = false; return }
+                        val chosenUid = choiceUids.getOrNull(position)?.ifBlank { null }
+                        Thread {
+                            try {
+                                FocusPolicyClient.setAccountabilityPartner(chosenUid)
+                                postToUi {
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        if (chosenUid == null) "Accountability partner cleared" else "Accountability partner set",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            } catch (e: Exception) {
+                                postToUi { Toast.makeText(this@MainActivity, "Failed: ${e.message}", Toast.LENGTH_SHORT).show() }
+                            }
+                        }.start()
+                    }
+                    override fun onNothingSelected(parent: AdapterView<*>?) {}
+                }
+            }
+        }.start()
+
+        refreshMyPendingApproval()
+        refreshIncomingApprovals()
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────

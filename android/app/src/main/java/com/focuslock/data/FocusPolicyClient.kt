@@ -688,7 +688,13 @@ object FocusPolicyClient {
         val effectiveAtMs: Long,
         val requestedAtMs: Long,
         val snapshot: PolicySnapshot,
-        val summaries: List<String>
+        val summaries: List<String>,
+        // Present only when an accountability partner was designated at
+        // request time — see writePendingChange. When set, this pending
+        // change is governed by ApprovalGate instead of the timer: effectiveAtMs
+        // is still stored (so the UI has a fallback to display) but is not
+        // consulted by applyDuePendingChange.
+        val approvalRequestId: String? = null
     )
 
     fun getPendingChange(): PendingChange? {
@@ -705,17 +711,25 @@ object FocusPolicyClient {
             effectiveAtMs = effectiveAtMs,
             requestedAtMs = (data["requestedAtMs"] as? Number)?.toLong() ?: 0L,
             snapshot = snapshotFromPendingMap(snapshotMap),
-            summaries = summaries
+            summaries = summaries,
+            approvalRequestId = data["approvalRequestId"] as? String
         )
     }
 
-    fun writePendingChange(effectiveAtMs: Long, requestedAtMs: Long, snapshot: PolicySnapshot, summaries: List<String>) {
-        val data = mapOf(
+    fun writePendingChange(
+        effectiveAtMs: Long,
+        requestedAtMs: Long,
+        snapshot: PolicySnapshot,
+        summaries: List<String>,
+        approvalRequestId: String? = null
+    ) {
+        val data = mutableMapOf<String, Any>(
             "effectiveAtMs" to effectiveAtMs,
             "requestedAtMs" to requestedAtMs,
             "snapshot" to snapshotToPendingMap(snapshot),
             "summaries" to summaries
         )
+        if (approvalRequestId != null) data["approvalRequestId"] = approvalRequestId
         Tasks.await(
             db.collection("users").document(userId).collection("policy").document("pending").set(data)
         )
@@ -733,14 +747,59 @@ object FocusPolicyClient {
      * prefs and deletes the pending doc. Returns whether anything applied.
      * Called from MainActivity.onResume; a second call site from
      * UsageMonitorService is wired separately (not added here).
+     *
+     * Governance: a pending change created WITHOUT an accountability partner
+     * is governed purely by [PolicyRatchet.isDue] against effectiveAtMs, same
+     * as before this slice. A pending change created WITH a partner is
+     * governed entirely by [ApprovalGate] instead — the timer is not
+     * consulted at all for it: approved applies now regardless of elapsed
+     * time, rejected cancels it outright, pending is a no-op. See the task
+     * report / ApprovalGate doc comment for why approval fully replaces the
+     * timer rather than racing it.
      */
     fun applyDuePendingChange(context: Context): Boolean {
         val pending = getPendingChange() ?: return false
-        if (!PolicyRatchet.isDue(pending.effectiveAtMs, System.currentTimeMillis())) return false
+        val approvalRequestId = pending.approvalRequestId
+        if (approvalRequestId != null) {
+            val status = getApprovalRequestStatus(userId, approvalRequestId) ?: return false
+            val gateStatus = when (status) {
+                ApprovalStatus.PENDING -> ApprovalGate.Status.PENDING
+                ApprovalStatus.APPROVED -> ApprovalGate.Status.APPROVED
+                ApprovalStatus.REJECTED -> ApprovalGate.Status.REJECTED
+            }
+            if (ApprovalGate.isCancelled(gateStatus)) {
+                cancelPendingChange()
+                return false
+            }
+            if (!ApprovalGate.isDue(gateStatus)) return false
+        } else {
+            if (!PolicyRatchet.isDue(pending.effectiveAtMs, System.currentTimeMillis())) return false
+        }
         updatePolicyFields(firestoreFieldsOf(pending.snapshot))
         applyLocalFields(context, pending.snapshot)
         cancelPendingChange()
         return true
+    }
+
+    /** The caller's own outstanding approval request, if their current pending change is partner-governed. */
+    fun getMyPendingApprovalRequest(): ApprovalRequest? {
+        val pending = getPendingChange() ?: return null
+        val requestId = pending.approvalRequestId ?: return null
+        val myUid = FirebaseAuth.getInstance().currentUser?.uid ?: return null
+        val snap = Tasks.await(approvalRequestsCollection(myUid).document(requestId).get())
+        val data = snap.data ?: return null
+        val ownerUid = data["ownerUid"] as? String ?: return null
+        val partnerUid = data["partnerUid"] as? String ?: return null
+        @Suppress("UNCHECKED_CAST")
+        val summaries = (data["summaries"] as? List<String>) ?: emptyList()
+        return ApprovalRequest(
+            requestId = requestId,
+            ownerUid = ownerUid,
+            partnerUid = partnerUid,
+            summaries = summaries,
+            status = ApprovalStatus.fromWire(data["status"] as? String ?: "pending"),
+            createdAt = data["createdAt"] as? String ?: ""
+        )
     }
 
     // ── Weekly usage ──────────────────────────────────────────────────────────
@@ -895,7 +954,16 @@ object FocusPolicyClient {
     // reason, and would require a cross-tree read (denied by the current
     // rules' membership check) just to look someone up by friend code.
 
-    data class Profile(val uid: String, val displayName: String, val friendCode: String)
+    data class Profile(
+        val uid: String,
+        val displayName: String,
+        val friendCode: String,
+        // Opt-in: an accepted friend this user has designated to gate their
+        // loosening changes (see approval_requests / ApprovalGate). Unilateral
+        // to set — no consent needed to designate someone, only to have them
+        // actually approve/reject a given request.
+        val accountabilityPartnerUid: String? = null
+    )
 
     private fun profilesCollection() = db.collection("profiles")
 
@@ -913,7 +981,7 @@ object FocusPolicyClient {
                 SetOptions.merge()
             )
         )
-        return Profile(uid, displayName, friendCode)
+        return getMyProfile() ?: Profile(uid, displayName, friendCode)
     }
 
     fun getMyProfile(): Profile? {
@@ -923,8 +991,39 @@ object FocusPolicyClient {
         return Profile(
             uid = uid,
             displayName = data["displayName"] as? String ?: "",
-            friendCode = data["friendCode"] as? String ?: FriendCode.generate(uid)
+            friendCode = data["friendCode"] as? String ?: FriendCode.generate(uid),
+            accountabilityPartnerUid = data["accountabilityPartnerUid"] as? String
         )
+    }
+
+    /** Looks up another user's profile by uid (e.g. to show a partner's display name). */
+    fun getProfileByUid(uid: String): Profile? {
+        val snap = Tasks.await(profilesCollection().document(uid).get())
+        val data = snap.data ?: return null
+        return Profile(
+            uid = uid,
+            displayName = data["displayName"] as? String ?: "",
+            friendCode = data["friendCode"] as? String ?: "",
+            accountabilityPartnerUid = data["accountabilityPartnerUid"] as? String
+        )
+    }
+
+    /**
+     * Designates (or clears, with null) [partnerUid] as this user's
+     * accountability partner. Unilateral — does not require the partner's
+     * consent to be designated, only to actually approve/reject a request
+     * (see [createApprovalRequest]/[respondToApprovalRequest]). Caller is
+     * responsible for only offering accepted friends as choices; not
+     * re-validated here since profiles/{uid} write rules already restrict
+     * this write to the profile's own owner.
+     */
+    fun setAccountabilityPartner(partnerUid: String?) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val fields: Map<String, Any> = if (partnerUid == null)
+            mapOf("accountabilityPartnerUid" to FieldValue.delete())
+        else
+            mapOf("accountabilityPartnerUid" to partnerUid)
+        Tasks.await(profilesCollection().document(uid).set(fields, SetOptions.merge()))
     }
 
     /** Looks up a profile by friend code (normalized). Returns null if no profile has that code. */
@@ -1032,6 +1131,103 @@ object FocusPolicyClient {
                 status = FriendshipStatus.fromWire(doc.getString("status") ?: "pending"),
                 requestedBy = doc.getString("requestedBy") ?: "",
                 otherUid = other
+            )
+        }
+    }
+
+    // ── Accountability-partner approval requests ──────────────────────────────
+    //
+    // Opt-in alternative/addition to the pure time-delay ratchet: writeup in
+    // approval_requests/{ownerUid}/requests/{requestId}, keyed by the
+    // requesting user's own uid (not the sync tree, same cross-tree reasoning
+    // as profiles/friendships). Governance decision (which of timer-vs-approval
+    // wins) lives in ApprovalGate + the pending-change call sites in
+    // FocusPolicyClient/MainActivity, not here — this is plumbing only.
+
+    enum class ApprovalStatus(val wire: String) {
+        PENDING("pending"), APPROVED("approved"), REJECTED("rejected");
+        companion object {
+            fun fromWire(wire: String) = values().firstOrNull { it.wire == wire } ?: PENDING
+        }
+    }
+
+    data class ApprovalRequest(
+        val requestId: String,
+        val ownerUid: String,
+        val partnerUid: String,
+        val summaries: List<String>,
+        val status: ApprovalStatus,
+        val createdAt: String
+    )
+
+    private fun approvalRequestsCollection(ownerUid: String) =
+        db.collection("approval_requests").document(ownerUid).collection("requests")
+
+    /** Creates a new pending approval request for the caller's own [partnerUid]-gated loosening. Returns the new request's id. */
+    fun createApprovalRequest(partnerUid: String, summaries: List<String>): String {
+        val myUid = FirebaseAuth.getInstance().currentUser?.uid
+            ?: throw IllegalStateException("Not signed in")
+        val ref = approvalRequestsCollection(myUid).document()
+        Tasks.await(
+            ref.set(
+                mapOf(
+                    "ownerUid" to myUid,
+                    "partnerUid" to partnerUid,
+                    "summaries" to summaries,
+                    "status" to ApprovalStatus.PENDING.wire,
+                    "createdAt" to java.time.Instant.now().toString()
+                )
+            )
+        )
+        return ref.id
+    }
+
+    /** The status of one of the caller's own outstanding requests (owner-side read). */
+    fun getApprovalRequestStatus(ownerUid: String, requestId: String): ApprovalStatus? {
+        val snap = Tasks.await(approvalRequestsCollection(ownerUid).document(requestId).get())
+        val data = snap.data ?: return null
+        return ApprovalStatus.fromWire(data["status"] as? String ?: return null)
+    }
+
+    /**
+     * Partner-side response: flips pending -> approved/rejected. Firestore
+     * rules additionally enforce that only the designated partner (and never
+     * the owner themselves) may do this — this client-side check just avoids
+     * an unnecessary round trip when that's already knowable locally.
+     */
+    fun respondToApprovalRequest(ownerUid: String, requestId: String, approved: Boolean): Boolean {
+        val myUid = FirebaseAuth.getInstance().currentUser?.uid ?: return false
+        if (myUid == ownerUid) {
+            Log.w(TAG, "Refusing to self-respond to approval request $requestId")
+            return false
+        }
+        Tasks.await(
+            approvalRequestsCollection(ownerUid).document(requestId)
+                .update("status", if (approved) ApprovalStatus.APPROVED.wire else ApprovalStatus.REJECTED.wire)
+        )
+        return true
+    }
+
+    /** Requests where the caller is the designated partner and a response is still needed. */
+    fun getPendingApprovalRequestsForMe(): List<ApprovalRequest> {
+        val myUid = FirebaseAuth.getInstance().currentUser?.uid ?: return emptyList()
+        val snap = Tasks.await(
+            db.collectionGroup("requests")
+                .whereEqualTo("partnerUid", myUid)
+                .whereEqualTo("status", ApprovalStatus.PENDING.wire)
+                .get()
+        )
+        return snap.documents.mapNotNull { doc ->
+            val ownerUid = doc.getString("ownerUid") ?: return@mapNotNull null
+            @Suppress("UNCHECKED_CAST")
+            val summaries = (doc.get("summaries") as? List<String>) ?: emptyList()
+            ApprovalRequest(
+                requestId = doc.id,
+                ownerUid = ownerUid,
+                partnerUid = myUid,
+                summaries = summaries,
+                status = ApprovalStatus.fromWire(doc.getString("status") ?: "pending"),
+                createdAt = doc.getString("createdAt") ?: ""
             )
         }
     }
