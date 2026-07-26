@@ -1,9 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.FocusLock" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <!-- Dark-only theme. There is no values-night/ directory and no other
+         values-* qualifier directory in this app, so framework-owned surfaces
+         (AlertDialog, Spinner popups using the default dropdown item layout)
+         previously followed the SYSTEM day/night setting while every app-owned
+         surface was hardcoded dark. On a device in system light mode that
+         produced near-white text on a near-white dialog/popup background.
+         Parenting to Theme.Material3.Dark.NoActionBar makes framework
+         surfaces match the app's dark palette regardless of system setting,
+         with no layout changes required. -->
+    <style name="Theme.FocusLock" parent="Theme.Material3.Dark.NoActionBar">
+        <!-- Keep Button auto-inflating as plain AppCompat Button rather than
+             MaterialButton. Material3 themes normally swap in
+             MaterialComponentsViewInflater, and MaterialButton's own
+             background/insets handling conflicts with the many
+             android:background="@drawable/button_primary|button_secondary"
+             buttons already in activity_main.xml, overlay_lock.xml and
+             overlay_friction.xml (custom ripple/shape drawables). Reverting
+             the inflater is a single line, requires zero button/layout
+             migration, and keeps existing custom drawables rendering exactly
+             as before. -->
+        <item name="viewInflaterClass">androidx.appcompat.app.AppCompatViewInflater</item>
+
         <item name="colorPrimary">@color/color_primary</item>
-        <item name="colorPrimaryVariant">@color/color_primary_variant</item>
+        <item name="colorOnPrimary">@color/text_primary</item>
+        <item name="colorPrimaryContainer">@color/color_primary_variant</item>
+        <item name="colorOnPrimaryContainer">@color/text_primary</item>
+
         <item name="colorSecondary">@color/color_accent</item>
+        <item name="colorOnSecondary">@color/bg_dark</item>
+
+        <item name="colorSurface">@color/surface_dark</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorSurfaceVariant">@color/surface_dark_card</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+
+        <item name="colorOutline">@color/border_color</item>
+
+        <item name="colorError">@color/color_danger</item>
+        <item name="colorOnError">@color/text_primary</item>
+
+        <item name="android:colorBackground">@color/bg_dark</item>
         <item name="android:windowBackground">@color/bg_dark</item>
         <item name="android:textColorPrimary">@color/text_primary</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>

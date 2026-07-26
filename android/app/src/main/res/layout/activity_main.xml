@@ -35,26 +35,22 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="FocusLock"
-                android:textColor="@color/text_primary"
-                android:textSize="32sp"
-                android:textStyle="bold" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Display"/>
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Stay Mindful • Break Habit Loops"
-                android:textColor="@color/text_secondary"
-                android:textSize="14sp"
-                android:layout_marginTop="4dp" />
+                android:layout_marginTop="4dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body.Secondary"/>
 
             <TextView
                 android:id="@+id/txtAppVersion"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp"
                 android:layout_marginTop="6dp"
-                android:padding="4dp" />
+                android:padding="4dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label.Secondary"/>
         </LinearLayout>
 
         <!-- Stats Card (today + weekly, merged) -->
@@ -70,44 +66,36 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="TODAY'S SCREEN TIME"
-                android:textColor="@color/color_primary"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.1" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
 
             <TextView
                 android:id="@+id/txtTodayMinutes"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="0 minutes"
-                android:textColor="@color/text_primary"
-                android:textSize="28sp"
-                android:textStyle="bold"
-                android:layout_marginTop="4dp" />
+                android:layout_marginTop="4dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Headline"/>
 
             <TextView
                 android:id="@+id/txtTodayOpens"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="0 opens today"
-                android:textColor="@color/text_secondary"
-                android:textSize="13sp"
-                android:layout_marginTop="8dp" />
+                android:layout_marginTop="8dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
 
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
                 android:background="@color/border_color"
-                android:layout_marginVertical="14dp" />
+                android:layout_marginVertical="14dp"
+                android:importantForAccessibility="no" />
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="WEEKLY USAGE"
-                android:textColor="@color/color_primary"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.1" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
 
             <LinearLayout
                 android:id="@+id/layoutWeeklyChart"
@@ -130,10 +118,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="PENDING TASK LIST"
-                android:textColor="@color/color_primary"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.1" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -148,14 +133,13 @@
                     android:layout_weight="1"
                     android:hint="Type a thing you should do..."
                     android:textColorHint="@color/text_secondary"
-                    android:textColor="@color/text_primary"
                     android:padding="12dp"
-                    android:textSize="14sp"
                     android:background="@drawable/edittext_background"
                     android:maxLines="1"
                     android:imeOptions="actionDone"
                     android:inputType="textCapSentences"
-                    android:layout_marginEnd="8dp" />
+                    android:layout_marginEnd="8dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                 <Button
                     android:id="@+id/btnAddTodo"
@@ -188,19 +172,15 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="FOCUS SESSION CONTROL"
-                android:textColor="@color/color_primary"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.1" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
 
             <TextView
                 android:id="@+id/txtFocusSession"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Focus session inactive"
-                android:textColor="@color/text_secondary"
-                android:textSize="14sp"
-                android:layout_marginTop="8dp" />
+                android:layout_marginTop="8dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body.Secondary"/>
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -213,9 +193,9 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Duration (min):"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="13sp"
-                    android:layout_marginEnd="8dp" />
+                    android:layout_marginEnd="8dp"
+                    android:labelFor="@id/editFocusDuration"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
 
                 <EditText
                     android:id="@+id/editFocusDuration"
@@ -223,11 +203,10 @@
                     android:layout_height="wrap_content"
                     android:text="25"
                     android:inputType="number"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
                     android:padding="8dp"
                     android:background="@drawable/edittext_background"
-                    android:maxLines="1" />
+                    android:maxLines="1"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
             </LinearLayout>
 
             <LinearLayout
@@ -242,10 +221,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1.2"
                     android:text="Start Focus"
-                    android:textSize="12sp"
                     android:layout_marginEnd="6dp"
                     android:background="@drawable/button_primary"
-                    android:textColor="@color/text_primary" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
 
                 <Button
                     android:id="@+id/btnStopFocus"
@@ -253,9 +231,8 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="0.8"
                     android:text="Stop"
-                    android:textSize="12sp"
                     android:background="@drawable/button_secondary"
-                    android:textColor="@color/text_primary" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
             </LinearLayout>
         </LinearLayout>
 
@@ -289,19 +266,15 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="MODES"
-                android:textColor="@color/color_primary"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.1" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
 
             <TextView
                 android:id="@+id/txtActivePreset"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="One tap applies a whole profile: per-app modes, limits, reels and friction."
-                android:textColor="@color/text_secondary"
-                android:textSize="13sp"
-                android:layout_marginTop="6dp" />
+                android:layout_marginTop="6dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -316,10 +289,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Chill"
-                    android:textSize="12sp"
                     android:layout_marginEnd="4dp"
                     android:background="@drawable/button_secondary"
-                    android:textColor="@color/text_primary" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
 
                 <Button
                     android:id="@+id/btnPresetFocus"
@@ -327,10 +299,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Focus"
-                    android:textSize="12sp"
                     android:layout_marginHorizontal="2dp"
                     android:background="@drawable/button_secondary"
-                    android:textColor="@color/text_primary" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
 
                 <Button
                     android:id="@+id/btnPresetStrict"
@@ -338,10 +309,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Strict"
-                    android:textSize="12sp"
                     android:layout_marginStart="4dp"
                     android:background="@drawable/button_secondary"
-                    android:textColor="@color/text_primary" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
             </LinearLayout>
         </LinearLayout>
 
@@ -358,18 +328,14 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="REELS &amp; SHORTS"
-                android:textColor="@color/color_primary"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.1" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Reels are counted in every mode. The daily limit only blocks in &quot;Count, block after limit&quot;."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp"
-                android:layout_marginTop="2dp" />
+                android:layout_marginTop="2dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Caption"/>
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -383,13 +349,14 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Instagram Reels"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp" />
+                    android:labelFor="@id/editReelLimitInstagram"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
 
                 <Spinner
                     android:id="@+id/spinnerInstagramReels"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
+                    android:layout_height="wrap_content"
+                    android:contentDescription="Instagram Reels friction mode" />
 
                 <EditText
                     android:id="@+id/editReelLimitInstagram"
@@ -399,11 +366,11 @@
                     android:hint="0=off"
                     android:textColorHint="@color/text_secondary"
                     android:inputType="number"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp"
                     android:padding="8dp"
                     android:background="@drawable/edittext_background"
-                    android:maxLines="1" />
+                    android:maxLines="1"
+                    android:contentDescription="Instagram Reels daily limit"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
             </LinearLayout>
 
             <LinearLayout
@@ -418,13 +385,14 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="YouTube Shorts"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp" />
+                    android:labelFor="@id/editReelLimitYoutube"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
 
                 <Spinner
                     android:id="@+id/spinnerYoutubeShorts"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
+                    android:layout_height="wrap_content"
+                    android:contentDescription="YouTube Shorts friction mode" />
 
                 <EditText
                     android:id="@+id/editReelLimitYoutube"
@@ -434,11 +402,11 @@
                     android:hint="0=off"
                     android:textColorHint="@color/text_secondary"
                     android:inputType="number"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp"
                     android:padding="8dp"
                     android:background="@drawable/edittext_background"
-                    android:maxLines="1" />
+                    android:maxLines="1"
+                    android:contentDescription="YouTube Shorts daily limit"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
             </LinearLayout>
 
             <TextView
@@ -447,8 +415,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:text="Today: 0 Reels · 0 Shorts"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Label.Secondary"/>
 
             <Button
                 android:id="@+id/btnSaveReelsPolicy"
@@ -464,10 +431,9 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="✓ Policy saved"
-                android:textColor="@color/color_accent"
-                android:textSize="13sp"
                 android:layout_marginTop="6dp"
-                android:visibility="gone" />
+                android:visibility="gone"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Accent"/>
         </LinearLayout>
 
         <!-- Blocking Rules Card (collapsible, collapsed by default) -->
@@ -486,34 +452,31 @@
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:clickable="true"
-                android:focusable="true">
+                android:focusable="true"
+                android:contentDescription="Blocking rules, tap to expand or collapse">
 
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="BLOCKING RULES"
-                    android:textColor="@color/color_primary"
-                    android:textSize="12sp"
-                    android:textStyle="bold"
-                    android:letterSpacing="0.1" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
 
                 <TextView
                     android:id="@+id/chevronBlockingRules"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="▸"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="16sp" />
+                    android:importantForAccessibility="no"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label.Large"/>
             </LinearLayout>
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Daily limit, blocked apps, and scheduled block windows. Tap to expand."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp"
-                android:layout_marginTop="2dp" />
+                android:layout_marginTop="2dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Caption"/>
 
             <LinearLayout
                 android:id="@+id/layoutBlockingRulesContent"
@@ -535,8 +498,8 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="Daily limit (minutes)"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp" />
+                        android:labelFor="@id/editDailyLimit"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                     <EditText
                         android:id="@+id/editDailyLimit"
@@ -545,11 +508,10 @@
                         android:hint="0=off"
                         android:textColorHint="@color/text_secondary"
                         android:inputType="number"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp"
                         android:padding="8dp"
                         android:background="@drawable/edittext_background"
-                        android:maxLines="1" />
+                        android:maxLines="1"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
                 </LinearLayout>
 
                 <!-- Session chunking: use for X minutes, then a forced break -->
@@ -565,8 +527,8 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="Use for (min) / break for (min)"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp" />
+                        android:labelFor="@id/editSessionMax"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                     <EditText
                         android:id="@+id/editSessionMax"
@@ -575,12 +537,11 @@
                         android:hint="0=off"
                         android:textColorHint="@color/text_secondary"
                         android:inputType="number"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp"
                         android:padding="8dp"
                         android:background="@drawable/edittext_background"
                         android:maxLines="1"
-                        android:layout_marginEnd="6dp" />
+                        android:layout_marginEnd="6dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                     <EditText
                         android:id="@+id/editSessionBreak"
@@ -589,20 +550,19 @@
                         android:hint="2"
                         android:textColorHint="@color/text_secondary"
                         android:inputType="number"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp"
                         android:padding="8dp"
                         android:background="@drawable/edittext_background"
-                        android:maxLines="1" />
+                        android:maxLines="1"
+                        android:contentDescription="Break duration in minutes"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
                 </LinearLayout>
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="After each chunk of continuous use, all managed apps hard-lock for the break — stops home-feed doomscrolling around the reel blocker."
-                    android:textColor="@color/text_secondary"
-                    android:textSize="11sp"
-                    android:layout_marginTop="4dp" />
+                    android:layout_marginTop="4dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Caption"/>
 
                 <!-- Extension settings -->
                 <LinearLayout
@@ -617,8 +577,8 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="Mins per extension"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp" />
+                        android:labelFor="@id/editExtensionMins"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                     <EditText
                         android:id="@+id/editExtensionMins"
@@ -627,11 +587,10 @@
                         android:hint="15"
                         android:textColorHint="@color/text_secondary"
                         android:inputType="number"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp"
                         android:padding="8dp"
                         android:background="@drawable/edittext_background"
-                        android:maxLines="1" />
+                        android:maxLines="1"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
                 </LinearLayout>
 
                 <LinearLayout
@@ -646,8 +605,8 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="Max extensions per day"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp" />
+                        android:labelFor="@id/editExtensionLimit"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                     <EditText
                         android:id="@+id/editExtensionLimit"
@@ -656,11 +615,10 @@
                         android:hint="1"
                         android:textColorHint="@color/text_secondary"
                         android:inputType="number"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp"
                         android:padding="8dp"
                         android:background="@drawable/edittext_background"
-                        android:maxLines="1" />
+                        android:maxLines="1"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
                 </LinearLayout>
 
                 <!-- Hard block toggle -->
@@ -669,25 +627,24 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Hard block after limit"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
                     android:paddingVertical="8dp"
-                    android:layout_marginTop="4dp" />
+                    android:layout_marginTop="4dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
                     android:background="@color/border_color"
-                    android:layout_marginVertical="12dp" />
+                    android:layout_marginVertical="12dp"
+                    android:importantForAccessibility="no" />
 
                 <!-- Target apps -->
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Blocked Apps (package names)"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
+                    android:textStyle="bold"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -702,12 +659,12 @@
                         android:layout_weight="1"
                         android:hint="com.instagram.android"
                         android:textColorHint="@color/text_secondary"
-                        android:textColor="@color/text_primary"
                         android:padding="10dp"
-                        android:textSize="13sp"
                         android:background="@drawable/edittext_background"
                         android:maxLines="1"
-                        android:layout_marginEnd="8dp" />
+                        android:layout_marginEnd="8dp"
+                        android:contentDescription="Package name of app to block"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
 
                     <Button
                         android:id="@+id/btnAddTargetApp"
@@ -715,8 +672,7 @@
                         android:layout_height="wrap_content"
                         android:text="Add"
                         android:background="@drawable/button_secondary"
-                        android:textColor="@color/text_primary"
-                        android:textSize="12sp" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
                 </LinearLayout>
 
                 <LinearLayout
@@ -730,16 +686,16 @@
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
                     android:background="@color/border_color"
-                    android:layout_marginVertical="12dp" />
+                    android:layout_marginVertical="12dp"
+                    android:importantForAccessibility="no" />
 
                 <!-- Block windows -->
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Block Windows"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
+                    android:textStyle="bold"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -755,21 +711,21 @@
                         android:layout_weight="1"
                         android:hint="22:00"
                         android:textColorHint="@color/text_secondary"
-                        android:textColor="@color/text_primary"
                         android:padding="10dp"
-                        android:textSize="13sp"
                         android:background="@drawable/edittext_background"
                         android:maxLines="1"
                         android:inputType="time"
-                        android:layout_marginEnd="4dp" />
+                        android:layout_marginEnd="4dp"
+                        android:contentDescription="Block window start time"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="–"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="16sp"
-                        android:paddingHorizontal="4dp" />
+                        android:paddingHorizontal="4dp"
+                        android:importantForAccessibility="no"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label.Large"/>
 
                     <EditText
                         android:id="@+id/editWindowEnd"
@@ -778,13 +734,13 @@
                         android:layout_weight="1"
                         android:hint="07:00"
                         android:textColorHint="@color/text_secondary"
-                        android:textColor="@color/text_primary"
                         android:padding="10dp"
-                        android:textSize="13sp"
                         android:background="@drawable/edittext_background"
                         android:maxLines="1"
                         android:inputType="time"
-                        android:layout_marginStart="4dp" />
+                        android:layout_marginStart="4dp"
+                        android:contentDescription="Block window end time"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
                 </LinearLayout>
 
                 <!-- Day checkboxes: Sun=0 Mon=1 Tue=2 Wed=3 Thu=4 Fri=5 Sat=6 -->
@@ -796,13 +752,20 @@
                     android:layout_marginTop="8dp"
                     android:weightSum="7">
 
-                    <CheckBox android:id="@+id/cbSun" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="S" android:textColor="@color/text_primary" android:textSize="12sp" android:checked="true" />
-                    <CheckBox android:id="@+id/cbMon" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="M" android:textColor="@color/text_primary" android:textSize="12sp" android:checked="true" />
-                    <CheckBox android:id="@+id/cbTue" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="T" android:textColor="@color/text_primary" android:textSize="12sp" android:checked="true" />
-                    <CheckBox android:id="@+id/cbWed" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="W" android:textColor="@color/text_primary" android:textSize="12sp" android:checked="true" />
-                    <CheckBox android:id="@+id/cbThu" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="T" android:textColor="@color/text_primary" android:textSize="12sp" android:checked="true" />
-                    <CheckBox android:id="@+id/cbFri" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="F" android:textColor="@color/text_primary" android:textSize="12sp" android:checked="true" />
-                    <CheckBox android:id="@+id/cbSat" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="S" android:textColor="@color/text_primary" android:textSize="12sp" android:checked="true" />
+                    <CheckBox android:id="@+id/cbSun" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="S" android:checked="true"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+                    <CheckBox android:id="@+id/cbMon" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="M" android:checked="true"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+                    <CheckBox android:id="@+id/cbTue" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="T" android:checked="true"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+                    <CheckBox android:id="@+id/cbWed" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="W" android:checked="true"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+                    <CheckBox android:id="@+id/cbThu" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="T" android:checked="true"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+                    <CheckBox android:id="@+id/cbFri" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="F" android:checked="true"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+                    <CheckBox android:id="@+id/cbSat" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="S" android:checked="true"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
                 </LinearLayout>
 
                 <Button
@@ -811,9 +774,8 @@
                     android:layout_height="wrap_content"
                     android:text="Add Window"
                     android:background="@drawable/button_secondary"
-                    android:textColor="@color/text_primary"
-                    android:textSize="12sp"
-                    android:layout_marginTop="8dp" />
+                    android:layout_marginTop="8dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
 
                 <LinearLayout
                     android:id="@+id/layoutBlockWindows"
@@ -836,10 +798,9 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="✓ Policy saved"
-                    android:textColor="@color/color_accent"
-                    android:textSize="13sp"
                     android:layout_marginTop="6dp"
-                    android:visibility="gone" />
+                    android:visibility="gone"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Accent"/>
             </LinearLayout>
         </LinearLayout>
 
@@ -873,20 +834,16 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="PROTECTION &amp; PERMISSIONS"
-                android:textColor="@color/color_primary"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.1" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
 
             <TextView
                 android:id="@+id/txtStatus"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Checking status..."
-                android:textColor="@color/text_primary"
-                android:textSize="14sp"
                 android:layout_marginTop="8dp"
-                android:lineSpacingExtra="4dp" />
+                android:lineSpacingExtra="4dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -901,10 +858,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Usage"
-                    android:textSize="11sp"
                     android:layout_marginEnd="4dp"
                     android:background="@drawable/button_secondary"
-                    android:textColor="@color/text_primary" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Caption.OnSurface"/>
 
                 <Button
                     android:id="@+id/btnAccessibility"
@@ -912,10 +868,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Access"
-                    android:textSize="11sp"
                     android:layout_marginHorizontal="2dp"
                     android:background="@drawable/button_secondary"
-                    android:textColor="@color/text_primary" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Caption.OnSurface"/>
 
                 <Button
                     android:id="@+id/btnOverlay"
@@ -923,10 +878,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Overlay"
-                    android:textSize="11sp"
                     android:layout_marginStart="4dp"
                     android:background="@drawable/button_secondary"
-                    android:textColor="@color/text_primary" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Caption.OnSurface"/>
             </LinearLayout>
 
             <LinearLayout
@@ -972,34 +926,31 @@
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:clickable="true"
-                android:focusable="true">
+                android:focusable="true"
+                android:contentDescription="Friction and blockers, tap to expand or collapse">
 
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="FRICTION &amp; BLOCKERS"
-                    android:textColor="@color/color_primary"
-                    android:textSize="12sp"
-                    android:textStyle="bold"
-                    android:letterSpacing="0.1" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
 
                 <TextView
                     android:id="@+id/chevronFriction"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="▸"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="16sp" />
+                    android:importantForAccessibility="no"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label.Large"/>
             </LinearLayout>
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Barriers to bypass when opening social apps. Tap to expand."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp"
-                android:layout_marginTop="2dp" />
+                android:layout_marginTop="2dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Caption"/>
 
             <LinearLayout
                 android:id="@+id/layoutFrictionContent"
@@ -1014,79 +965,72 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Breathing Pause (12 seconds)"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
                     android:paddingVertical="8dp"
-                    android:layout_marginTop="8dp" />
+                    android:layout_marginTop="8dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                 <androidx.appcompat.widget.SwitchCompat
                     android:id="@+id/switchDelay"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Wait Delay (10 seconds)"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
-                    android:paddingVertical="8dp" />
+                    android:paddingVertical="8dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                 <androidx.appcompat.widget.SwitchCompat
                     android:id="@+id/switchIntention"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Intention Setting Prompt"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
-                    android:paddingVertical="8dp" />
+                    android:paddingVertical="8dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                 <androidx.appcompat.widget.SwitchCompat
                     android:id="@+id/switchShake"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Shake Challenge (Accelerometer)"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
-                    android:paddingVertical="8dp" />
+                    android:paddingVertical="8dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                 <androidx.appcompat.widget.SwitchCompat
                     android:id="@+id/switchReflection"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Cognitive Reflection (Mindful typing)"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
-                    android:paddingVertical="8dp" />
+                    android:paddingVertical="8dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                 <androidx.appcompat.widget.SwitchCompat
                     android:id="@+id/switchStats"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Stats &amp; Checklist display"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
-                    android:paddingVertical="8dp" />
+                    android:paddingVertical="8dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                 <androidx.appcompat.widget.SwitchCompat
                     android:id="@+id/switchMath"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Math Gate (Verification check)"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
-                    android:paddingVertical="8dp" />
+                    android:paddingVertical="8dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                 <androidx.appcompat.widget.SwitchCompat
                     android:id="@+id/switchDeviceAdmin"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Strict Mode (Device Admin)"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
-                    android:paddingVertical="8dp" />
+                    android:paddingVertical="8dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
                     android:background="@color/border_color"
-                    android:layout_marginVertical="12dp" />
+                    android:layout_marginVertical="12dp"
+                    android:importantForAccessibility="no" />
 
                 <!-- Math Difficulty Selection -->
                 <LinearLayout
@@ -1100,15 +1044,16 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="Math Difficulty"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp" />
+                        android:labelFor="@id/spinnerMathDifficulty"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                     <Spinner
                         android:id="@+id/spinnerMathDifficulty"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:textColor="@color/text_primary"
-                        android:backgroundTint="@color/text_primary" />
+                        android:backgroundTint="@color/text_primary"
+                        android:contentDescription="Math gate difficulty" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>
@@ -1126,18 +1071,14 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="SYNC CODE"
-                android:textColor="@color/color_primary"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.1" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Use the same code on your phone and desktop to keep them in sync. A different person should pick their own code to keep their data separate."
-                android:textColor="@color/text_secondary"
-                android:textSize="13sp"
-                android:layout_marginTop="6dp" />
+                android:layout_marginTop="6dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -1154,11 +1095,11 @@
                     android:hint="e.g. dhruv-01"
                     android:textColorHint="@color/text_secondary"
                     android:inputType="textNoSuggestions"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
                     android:padding="10dp"
                     android:background="@drawable/edittext_background"
-                    android:maxLines="1" />
+                    android:maxLines="1"
+                    android:contentDescription="Sync code"
+                android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
                 <Button
                     android:id="@+id/btnSaveSyncId"
@@ -1184,21 +1125,17 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="REEL DETECTION"
-                android:textColor="@color/color_primary"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.1" />
+                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
 
             <TextView
                 android:id="@+id/txtReelDetection"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Loading…"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp"
                 android:fontFamily="monospace"
                 android:layout_marginTop="8dp"
-                android:lineSpacingExtra="2dp" />
+                android:lineSpacingExtra="2dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label.Secondary"/>
         </LinearLayout>
 
     </LinearLayout>
