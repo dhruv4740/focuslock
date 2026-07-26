@@ -1166,6 +1166,11 @@ class MainActivity : AppCompatActivity() {
         fun refresh() {
             Thread {
                 try {
+                    // A queued lowering that has now waited out the current delay
+                    // applies here, before the guard is displayed or re-checked —
+                    // otherwise it would sit applied-but-unreflected until the next
+                    // unrelated policy save happened to read it.
+                    FocusPolicyClient.applyDuePendingDelayChange()
                     val guard = FocusPolicyClient.getRatchetGuard()
                     postToUi {
                         editDelay.setText(guard.loosenDelayHours.toString())
@@ -1174,6 +1179,9 @@ class MainActivity : AppCompatActivity() {
                             locked -> "Locked until ${formatEpochMs(guard.lockedUntilMs!!)} — no setting can be loosened until then."
                             guard.lockedUntilMs != null -> "Lock expired ${formatEpochMs(guard.lockedUntilMs)}. Not currently locked."
                             else -> "Not locked. Loosened changes still take effect after ${guard.loosenDelayHours}h either way."
+                        }
+                        if (guard.pendingLoosenDelayHours != null && guard.pendingLoosenDelayEffectiveAtMs != null) {
+                            txtLockStatus.text = "${txtLockStatus.text}\nDelay change to ${guard.pendingLoosenDelayHours}h takes effect ${formatEpochMs(guard.pendingLoosenDelayEffectiveAtMs)}."
                         }
                         btnClearLock.isEnabled = locked
                     }
@@ -1207,12 +1215,28 @@ class MainActivity : AppCompatActivity() {
                         }
                         return@Thread
                     }
-                    // NOTE: raising the delay applies immediately. Lowering it is
-                    // gated by the commitment lock above but is NOT additionally
-                    // time-deferred by the current (longer) delay value — doing
-                    // that fully needs its own pending-style field in
-                    // FocusPolicyClient, which this pass intentionally left
-                    // untouched. Flagged in the task report, not hidden here.
+                    if (direction == ChangeDirection.LOOSEN) {
+                        // The delay is ratcheted like everything else it protects:
+                        // shortening it is itself a loosening, gated by the delay
+                        // CURRENTLY in force. Without this, "set delay to 0" is a
+                        // one-tap bypass of the whole mechanism — every other
+                        // loosening becomes instant the moment this one field
+                        // changes. So a shorter delay only starts protecting future
+                        // loosenings once it has itself survived waiting out the
+                        // old one.
+                        val effectiveAt = PolicyRatchet.effectiveAtMs(now, guard.loosenDelayHours)
+                        FocusPolicyClient.requestLoosenDelayChange(newHours, effectiveAt)
+                        postToUi {
+                            Toast.makeText(
+                                this,
+                                "Shorter delay takes effect in ${guard.loosenDelayHours}h, not immediately",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            btn.isEnabled = true
+                            refresh()
+                        }
+                        return@Thread
+                    }
                     FocusPolicyClient.updateRatchetGuard(loosenDelayHours = newHours)
                     postToUi {
                         Toast.makeText(this, "Loosen delay set to ${newHours}h", Toast.LENGTH_SHORT).show()
@@ -1330,6 +1354,10 @@ class MainActivity : AppCompatActivity() {
                         refreshPendingBanner()
                     }
                 }
+                // Same lazy-apply-on-resume treatment for a queued loosening of the
+                // delay itself — otherwise it only takes effect the next time the
+                // user happens to open the Settings screen's ratchet card.
+                FocusPolicyClient.applyDuePendingDelayChange()
             } catch (e: Exception) {
                 // Best-effort; the next resume retries.
             }

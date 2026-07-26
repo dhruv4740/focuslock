@@ -498,12 +498,19 @@ object FocusPolicyClient {
 
     // ── Ratchet: guard read, snapshot conversion, pending doc ────────────────
 
-    data class RatchetGuard(val loosenDelayHours: Int, val lockedUntilMs: Long?)
+    data class RatchetGuard(
+        val loosenDelayHours: Int,
+        val lockedUntilMs: Long?,
+        // A shorter delay a user has requested but not yet earned — see
+        // requestLoosenDelayChange. Present only while it's still waiting.
+        val pendingLoosenDelayHours: Int? = null,
+        val pendingLoosenDelayEffectiveAtMs: Long? = null
+    )
 
     /**
-     * Fresh (uncached) read of just the two gate fields. Called at the moment a
-     * save is about to happen, not from [currentPolicy]-style cached state — a
-     * lock set from another device a second ago must still be honored.
+     * Fresh (uncached) read of the gate fields. Called at the moment a save is
+     * about to happen, not from [currentPolicy]-style cached state — a lock set
+     * from another device a second ago must still be honored.
      */
     fun getRatchetGuard(): RatchetGuard {
         val snap = Tasks.await(
@@ -513,12 +520,23 @@ object FocusPolicyClient {
         val data = snap.data ?: mapOf<String, Any>()
         return RatchetGuard(
             loosenDelayHours = (data["loosenDelayHours"] as? Number)?.toInt() ?: 24,
-            lockedUntilMs = (data["settingsLockedUntilMs"] as? Number)?.toLong()
+            lockedUntilMs = (data["settingsLockedUntilMs"] as? Number)?.toLong(),
+            pendingLoosenDelayHours = (data["pendingLoosenDelayHours"] as? Number)?.toInt(),
+            pendingLoosenDelayEffectiveAtMs = (data["pendingLoosenDelayEffectiveAtMs"] as? Number)?.toLong()
         )
     }
 
+    /**
+     * Applies loosenDelayHours immediately. Only ever called for a raising of the
+     * delay (a tightening) or a lock change — never for a lowering, which must go
+     * through [requestLoosenDelayChange] instead. Also clears any pending lowering,
+     * since a fresh instant change (e.g. a lock) supersedes whatever was queued.
+     */
     fun updateRatchetGuard(loosenDelayHours: Int? = null, lockedUntilMs: Long? = null, clearLock: Boolean = false) {
-        val fields = mutableMapOf<String, Any>()
+        val fields = mutableMapOf<String, Any>(
+            "pendingLoosenDelayHours" to FieldValue.delete(),
+            "pendingLoosenDelayEffectiveAtMs" to FieldValue.delete()
+        )
         loosenDelayHours?.let { fields["loosenDelayHours"] = it }
         if (clearLock) {
             fields["settingsLockedUntilMs"] = FieldValue.delete()
@@ -526,6 +544,39 @@ object FocusPolicyClient {
             lockedUntilMs?.let { fields["settingsLockedUntilMs"] = it }
         }
         updatePolicyFields(fields)
+    }
+
+    /**
+     * Queues a *lowering* of loosenDelayHours to take effect after the CURRENT
+     * delay elapses, rather than applying it at once. Without this, the delay is
+     * a one-tap bypass of the entire ratchet: set it to 0, then loosen everything
+     * immediately. The delay that governs the wait is whatever is in force right
+     * now — a shorter delay only starts protecting loosenings once it has itself
+     * survived being loosened.
+     */
+    fun requestLoosenDelayChange(newHours: Int, effectiveAtMs: Long) {
+        updatePolicyFields(
+            mapOf(
+                "pendingLoosenDelayHours" to newHours,
+                "pendingLoosenDelayEffectiveAtMs" to effectiveAtMs
+            )
+        )
+    }
+
+    /** If a queued delay-lowering is due, applies it and clears the pending fields. Returns whether it applied. */
+    fun applyDuePendingDelayChange(): Boolean {
+        val guard = getRatchetGuard()
+        val pendingHours = guard.pendingLoosenDelayHours ?: return false
+        val effectiveAt = guard.pendingLoosenDelayEffectiveAtMs ?: return false
+        if (!PolicyRatchet.isDue(effectiveAt, System.currentTimeMillis())) return false
+        updatePolicyFields(
+            mapOf(
+                "loosenDelayHours" to pendingHours,
+                "pendingLoosenDelayHours" to FieldValue.delete(),
+                "pendingLoosenDelayEffectiveAtMs" to FieldValue.delete()
+            )
+        )
+        return true
     }
 
     // frictionSteps/mathDifficulty live in local SharedPreferences, not
