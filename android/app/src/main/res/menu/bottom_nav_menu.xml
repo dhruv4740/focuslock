@@ -3,13 +3,13 @@
     <item
         android:id="@+id/navHome"
         android:title="Home"
-        android:icon="@android:drawable/ic_menu_view" />
+        android:icon="@drawable/ic_nav_home" />
     <item
         android:id="@+id/navRules"
         android:title="Rules"
-        android:icon="@android:drawable/ic_menu_manage" />
+        android:icon="@drawable/ic_nav_rules" />
     <item
         android:id="@+id/navSettings"
         android:title="Settings"
-        android:icon="@android:drawable/ic_menu_preferences" />
+        android:icon="@drawable/ic_nav_settings" />
 </menu>

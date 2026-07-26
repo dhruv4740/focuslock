@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Shield silhouette, brand indigo/violet, centred in the 72x72 safe zone -->
+    <path
+        android:fillColor="#6366F1"
+        android:pathData="M54,21 L79,30 V52 C79,68 68,80.5 54,85 C40,80.5 29,68 29,52 V30 Z" />
+    <path
+        android:fillColor="#A78BFA"
+        android:pathData="M54,25.5 L74.5,32.8 V52 C74.5,65.8 65.5,76.3 54,80.2 C42.5,76.3 33.5,65.8 33.5,52 V32.8 Z" />
+    <!-- Pause bars, inset on the violet field -->
+    <path
+        android:fillColor="#0A0E17"
+        android:pathData="M46,42 h6 v22 h-6 z" />
+    <path
+        android:fillColor="#0A0E17"
+        android:pathData="M56,42 h6 v22 h-6 z" />
+</vector>
