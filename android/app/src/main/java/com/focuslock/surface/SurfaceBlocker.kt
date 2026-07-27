@@ -43,6 +43,7 @@ object SurfaceBlocker {
     private const val COUNTS_PREFS_NAME = "FocusLockReelCounts"
     private const val POLICY_PREFS_NAME = "FocusLockSurfacePolicy"
     private const val ALIASES_PREFS_NAME = "FocusLockSurfaceAliases"
+    private const val DETECTION_PREFS_NAME = "FocusLockSurfaceDetection"
     private const val MAX_LEARNED_ALIASES = 8
 
     /**
@@ -73,6 +74,10 @@ object SurfaceBlocker {
     // Packages resolved to a surface only via a learned pager-ID alias (e.g. the
     // user's actual Morphe applicationId), not the static set or vendor heuristic.
     @Volatile private var learnedAliases: Map<String, BlockableSurface> = emptyMap()
+    @Volatile private var recentDetections: Map<BlockableSurface, DetectionInfo> = emptyMap()
+
+    /** A user-facing receipt that the full-screen viewer was actually seen. */
+    data class DetectionInfo(val atMs: Long, val packageName: String)
 
     private val countsRef = AtomicReference(CountsState())
     private val tracker = SurfaceSessionTracker()
@@ -97,6 +102,7 @@ object SurfaceBlocker {
         appContext = context.applicationContext
         loadLearnedAliases()
         loadPersistedPolicy()
+        loadRecentDetections()
 
         val prefs = appContext!!.getSharedPreferences(COUNTS_PREFS_NAME, Context.MODE_PRIVATE)
         val savedDate = prefs.getString("date", "") ?: ""
@@ -180,11 +186,40 @@ object SurfaceBlocker {
     /** Packages resolved only via a learned pager-ID alias — consumed by the badge code. */
     fun learnedAliases(): Map<String, BlockableSurface> = learnedAliases
 
+    private fun loadRecentDetections() {
+        val prefs = appContext?.getSharedPreferences(DETECTION_PREFS_NAME, Context.MODE_PRIVATE) ?: return
+        recentDetections = BlockableSurface.entries.mapNotNull { surface ->
+            val atMs = prefs.getLong("seen_${surface.wireKey}", 0L)
+            val pkg = prefs.getString("package_${surface.wireKey}", null)
+            if (atMs > 0L && !pkg.isNullOrBlank()) surface to DetectionInfo(atMs, pkg) else null
+        }.toMap()
+    }
+
+    private fun recordDetection(surface: BlockableSurface, packageName: String, nowMs: Long) {
+        val previous = recentDetections[surface]
+        recentDetections = recentDetections + (surface to DetectionInfo(nowMs, packageName))
+        // The presence probe runs frequently while a reel plays. Keep the in-memory
+        // receipt fresh, but write it at most once every 30 seconds (or on app change).
+        if (previous?.packageName == packageName && nowMs - previous.atMs < 30_000L) return
+        appContext?.getSharedPreferences(DETECTION_PREFS_NAME, Context.MODE_PRIVATE)?.edit()
+            ?.putLong("seen_${surface.wireKey}", nowMs)
+            ?.putString("package_${surface.wireKey}", packageName)
+            ?.apply()
+        Log.i(TAG, "Detected ${surface.wireKey} in $packageName")
+    }
+
     val isActive: Boolean
         get() = modes.values.any { it != SurfaceMode.OFF }
 
     /** Read-only snapshot for the overlay badge — no side effects besides the rollover check. */
-    data class ReelStatus(val enabled: Boolean, val count: Int, val limit: Int, val blocked: Boolean, val mode: SurfaceMode)
+    data class ReelStatus(
+        val enabled: Boolean,
+        val count: Int,
+        val limit: Int,
+        val blocked: Boolean,
+        val mode: SurfaceMode,
+        val lastDetection: DetectionInfo?
+    )
 
     fun statusFor(surface: BlockableSurface): ReelStatus {
         rolloverIfNeeded(System.currentTimeMillis())
@@ -196,7 +231,8 @@ object SurfaceBlocker {
             count = count,
             limit = limit,
             blocked = limit > 0 && count >= limit,
-            mode = configured
+            mode = configured,
+            lastDetection = recentDetections[surface]
         )
     }
 
@@ -530,6 +566,7 @@ object SurfaceBlocker {
             }
 
             lastPresentAtMs[surface] = nowMs
+            recordDetection(surface, pkg, nowMs)
             val newlyOpened = counter.onViewerVisible(surface, nowMs)
             recordReelViews(surface, newlyOpened)
             return if (mode != SurfaceMode.OFF) tracker.onViewerVisible(surface, mode, nowMs) else null

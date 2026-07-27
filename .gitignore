@@ -25,3 +25,16 @@ Thumbs.db
 
 # Per-machine sync code (each install picks its own account)
 windows-agent/config/settings.json
+
+# Firebase config: inert (no google-services plugin applied) and not the
+# credential source of truth (see FocusPolicyClient.init's hardcoded
+# FirebaseOptions) — don't commit it.
+android/app/google-services.json
+
+# On-device debug captures (screenshots, UI-dump XML) taken while diagnosing
+# detection issues — not build inputs.
+/*.png
+/rules-*.xml
+/focus-home-new.xml
+/instagram-home.xml
+!/instagram-reels.xml

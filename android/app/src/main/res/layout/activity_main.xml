@@ -4,6 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
+    android:fitsSystemWindows="true"
     android:background="@color/bg_dark">
 
     <FrameLayout
@@ -22,7 +23,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="20dp">
+        android:padding="16dp">
 
         <!-- Title Section -->
         <LinearLayout
@@ -205,8 +206,7 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
+                android:orientation="vertical"
                 android:layout_marginTop="@dimen/space_md">
 
                 <TextView
@@ -237,7 +237,7 @@
 
                 <Button
                     android:id="@+id/btnStartFocus"
-                    android:layout_width="0dp"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_weight="1.2"
                     android:text="Start Focus"
@@ -394,37 +394,36 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Reels are counted in every mode. The daily limit only blocks in &quot;Count, block after limit&quot;."
+                android:text="Choose what happens only when a Reel or Short opens. Regular YouTube videos are never blocked by these controls."
                 android:layout_marginTop="2dp"
                 android:textAppearance="@style/TextAppearance.FocusLock.Caption"/>
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
+                android:orientation="vertical"
                 android:layout_marginTop="@dimen/space_md">
 
                 <TextView
-                    android:layout_width="0dp"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
                     android:text="Instagram Reels"
                     android:labelFor="@id/editReelLimitInstagram"
                 android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
 
                 <Spinner
                     android:id="@+id/spinnerInstagramReels"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:contentDescription="Instagram Reels friction mode" />
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:contentDescription="Choose an action for Instagram Reels" />
 
                 <EditText
                     android:id="@+id/editReelLimitInstagram"
-                    android:layout_width="60dp"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/space_sm"
-                    android:hint="0=off"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:hint="Daily limit (optional)"
                     android:textColorHint="@color/text_secondary"
                     android:inputType="number"
                     android:padding="@dimen/space_sm"
@@ -437,30 +436,29 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
+                android:orientation="vertical"
                 android:layout_marginTop="@dimen/space_sm">
 
                 <TextView
-                    android:layout_width="0dp"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
                     android:text="YouTube Shorts"
                     android:labelFor="@id/editReelLimitYoutube"
                 android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
 
                 <Spinner
                     android:id="@+id/spinnerYoutubeShorts"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:contentDescription="YouTube Shorts friction mode" />
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:contentDescription="Choose an action for YouTube Shorts" />
 
                 <EditText
                     android:id="@+id/editReelLimitYoutube"
-                    android:layout_width="60dp"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/space_sm"
-                    android:hint="0=off"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:hint="Daily limit (optional)"
                     android:textColorHint="@color/text_secondary"
                     android:inputType="number"
                     android:padding="@dimen/space_sm"
@@ -535,7 +533,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Daily limit, blocked apps, and scheduled block windows. Tap to expand."
+                        android:text="Pick apps, decide what happens in them, and set time limits. Tap to expand."
                 android:layout_marginTop="2dp"
                 android:textAppearance="@style/TextAppearance.FocusLock.Caption"/>
 
@@ -718,7 +716,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:hint="com.instagram.android"
+                        android:hint="Pick an app below or enter a package name"
                         android:textColorHint="@color/text_secondary"
                         android:padding="10dp"
                         android:background="@drawable/edittext_background"
@@ -740,7 +738,7 @@
                     android:id="@+id/btnPickInstalledApps"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Pick from installed apps"
+                    android:text="Choose apps on this phone"
                     android:layout_marginTop="@dimen/space_sm"
                     android:background="@drawable/button_secondary"
                 android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
@@ -1077,6 +1075,15 @@
                     android:background="@drawable/button_secondary"
                     android:textColor="@color/text_primary" />
             </LinearLayout>
+
+            <Button
+                android:id="@+id/btnOpenSetupGuide"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:text="Open setup guide"
+                android:background="@drawable/button_secondary"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
         </LinearLayout>
 
         <!-- Friction & Blocker Settings Card (collapsible, collapsed by default) -->
@@ -1315,6 +1322,24 @@
                 android:layout_marginTop="@dimen/space_md" />
 
             <TextView
+                android:id="@+id/txtGoogleAccount"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Not signed in"
+                android:layout_marginTop="@dimen/space_sm"
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
+
+            <Button
+                android:id="@+id/btnGoogleSignOut"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Sign out"
+                android:layout_marginTop="@dimen/space_sm"
+                android:visibility="gone"
+                android:background="@drawable/button_secondary"
+                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+
+            <TextView
                 android:id="@+id/txtMyFriendCode"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -1416,7 +1441,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Loosening any limit — Rules or the friction toggles below — is delayed, never instant. This is friction against your own future impulse, not a technical lock; it says when a change takes effect, not that it can't be changed."
+                android:text="A pause button for your future self. When you make protection weaker, the change waits for the delay below. Making protection stronger works straight away. You can still change this setting later."
                 android:layout_marginTop="6dp"
                 android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
 
@@ -1431,7 +1456,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Loosen delay (hours)"
+                    android:text="Wait before making protection weaker (hours)"
                     android:labelFor="@id/editLoosenDelayHours"
                 android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
@@ -1510,7 +1535,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Optional: pick an accepted friend to gate your loosening changes instead of the timer above. When set, a loosening waits on their approval — not on the clock — and a rejection cancels it outright."
+                android:text="Optional. Choose a trusted friend who must approve requests to make your limits weaker. If you do not choose someone, the waiting time above is used instead."
                 android:layout_marginTop="6dp"
                 android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
 
@@ -1555,18 +1580,24 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="REEL DETECTION"
+                android:text="SHORTS &amp; REELS STATUS"
                 android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
 
             <TextView
                 android:id="@+id/txtReelDetection"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Loading…"
-                android:fontFamily="monospace"
+                android:text="Checking which supported apps are available…"
                 android:layout_marginTop="@dimen/space_sm"
                 android:lineSpacingExtra="2dp"
-                android:textAppearance="@style/TextAppearance.FocusLock.Label.Secondary"/>
+                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="To check it: open a full-screen Reel or Short, then come back here. This card will show when FocusLock last saw it."
+                android:layout_marginTop="@dimen/space_sm"
+                android:textAppearance="@style/TextAppearance.FocusLock.Caption"/>
         </LinearLayout>
 
     </LinearLayout>

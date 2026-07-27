@@ -1,133 +1,128 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:background="@color/bg_dark"
-    android:scrollbars="none">
+    android:fitsSystemWindows="true"
+    android:padding="@dimen/space_xl">
+
+    <TextView
+        android:id="@+id/txtOnboardProgress"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="end"
+        android:textAppearance="@style/TextAppearance.FocusLock.Caption"/>
+
+    <TextView
+        android:id="@+id/txtOnboardEyebrow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_xl"
+        android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
+
+    <TextView
+        android:id="@+id/txtOnboardTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_sm"
+        android:textAppearance="@style/TextAppearance.FocusLock.Display"/>
+
+    <TextView
+        android:id="@+id/txtOnboardBody"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_md"
+        android:lineSpacingExtra="4dp"
+        android:textAppearance="@style/TextAppearance.FocusLock.Body.Secondary"/>
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_xl"
+        android:background="@drawable/card_background"
         android:orientation="vertical"
-        android:padding="20dp">
+        android:padding="@dimen/card_padding">
 
         <TextView
+            android:id="@+id/txtOnboardTipTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Welcome to FocusLock"
-            android:textAppearance="@style/TextAppearance.FocusLock.Display"/>
+            android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
 
         <TextView
+            android:id="@+id/txtOnboardTip"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/space_sm"
-            android:text="FocusLock watches the apps you pick, counts your usage, and steps in — with friction, limits or a hard block — once you go past what you set. It only manages what you tell it to."
-            android:textAppearance="@style/TextAppearance.FocusLock.Body.Secondary"/>
+            android:lineSpacingExtra="3dp"
+            android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
 
-        <LinearLayout
+        <TextView
+            android:id="@+id/txtOnboardReadiness"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@drawable/card_background"
-            android:orientation="vertical"
-            android:padding="@dimen/card_padding"
-            android:layout_marginTop="@dimen/space_xl">
+            android:layout_marginTop="@dimen/space_md"
+            android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Accent"/>
+    </LinearLayout>
 
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="1. ACCESSIBILITY PERMISSION"
-                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
+    <EditText
+        android:id="@+id/editOnboardSyncId"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_lg"
+        android:hint="Private sync code"
+        android:inputType="textNoSuggestions"
+        android:maxLines="1"
+        android:padding="@dimen/card_padding"
+        android:background="@drawable/edittext_background"
+        android:textColorHint="@color/text_secondary"
+        android:visibility="gone"
+        android:textAppearance="@style/TextAppearance.FocusLock.Body"/>
 
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_xs"
-                android:text="Required — this is how FocusLock sees which app is in front and can intervene."
-                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
 
-            <Button
-                android:id="@+id/btnOnboardAccessibility"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Open Accessibility Settings"
-                android:layout_marginTop="@dimen/space_sm"
-                android:background="@drawable/button_primary"
-                android:textColor="@color/text_primary"/>
-        </LinearLayout>
+    <Button
+        android:id="@+id/btnOnboardPrimary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/button_primary"
+        android:textColor="@color/text_primary"/>
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/card_background"
-            android:orientation="vertical"
-            android:padding="@dimen/card_padding"
-            android:layout_marginTop="@dimen/space_lg">
+    <Button
+        android:id="@+id/btnOnboardSecondary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_sm"
+        android:background="@drawable/button_secondary"
+        android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
 
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="2. DEVICE ADMIN (OPTIONAL)"
-                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_xs"
-                android:text="Prevents the app from being uninstalled while a block is active. Can be turned on later from Settings."
-                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
-
-            <Button
-                android:id="@+id/btnOnboardDeviceAdmin"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Enable Device Admin"
-                android:layout_marginTop="@dimen/space_sm"
-                android:background="@drawable/button_secondary"
-                android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/card_background"
-            android:orientation="vertical"
-            android:padding="@dimen/card_padding"
-            android:layout_marginTop="@dimen/space_lg">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="3. SYNC CODE"
-                android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_xs"
-                android:text="A shared code lets this phone and the desktop agent (or another device) see the same rules and usage. Pick anything — you can change it later."
-                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Secondary"/>
-
-            <EditText
-                android:id="@+id/editOnboardSyncId"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="e.g. dhruv-01"
-                android:textColorHint="@color/text_secondary"
-                android:padding="10dp"
-                android:background="@drawable/edittext_background"
-                android:maxLines="1"
-                android:layout_marginTop="@dimen/space_sm"
-                android:textAppearance="@style/TextAppearance.FocusLock.BodySmall"/>
-        </LinearLayout>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_sm"
+        android:orientation="horizontal">
 
         <Button
-            android:id="@+id/btnOnboardFinish"
-            android:layout_width="match_parent"
+            android:id="@+id/btnOnboardBack"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Get Started"
-            android:layout_marginTop="@dimen/space_xl"
-            android:background="@drawable/button_primary"
-            android:textColor="@color/text_primary"/>
+            android:layout_weight="1"
+            android:text="Back"
+            android:background="@drawable/button_secondary"
+            android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
 
+        <Button
+            android:id="@+id/btnOnboardNext"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/space_sm"
+            android:text="Continue"
+            android:background="@drawable/button_secondary"
+            android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
     </LinearLayout>
-</ScrollView>
+</LinearLayout>

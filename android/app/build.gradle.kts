@@ -77,6 +77,7 @@ dependencies {
     implementation("androidx.credentials:credentials:1.3.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
     testImplementation("junit:junit:4.13.2")
     // Real org.json impl for local unit tests — the Android SDK's org.json is a
     // stub that throws at runtime outside instrumented/Robolectric tests, and

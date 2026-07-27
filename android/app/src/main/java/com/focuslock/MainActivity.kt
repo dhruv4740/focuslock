@@ -32,6 +32,7 @@ import com.focuslock.data.PolicySnapshot
 import com.focuslock.data.PresetMapper
 import com.focuslock.update.UpdateChecker
 import com.google.android.material.bottomnavigation.BottomNavigationView
+import com.google.firebase.auth.FirebaseAuth
 import com.focuslock.receiver.PolicyDeviceAdminReceiver
 import com.focuslock.security.EnforcementChecks
 import com.focuslock.service.UsageMonitorService
@@ -41,6 +42,10 @@ import com.focuslock.surface.SurfaceMode
 import java.time.LocalDate
 
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        const val EXTRA_OPEN_RULES = "open_rules"
+    }
 
     private lateinit var statusText: TextView
     private lateinit var focusSessionText: TextView
@@ -342,7 +347,18 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         FocusPolicyClient.init(this)
 
+        if (FocusPolicyClient.consumeCreatedPrivateSyncCode()) {
+            Toast.makeText(
+                this,
+                "A private sync code was created for this phone. Copy it from Settings when connecting your laptop.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+
         setupBottomNav()
+        if (intent.getBooleanExtra(EXTRA_OPEN_RULES, false)) {
+            findViewById<BottomNavigationView>(R.id.bottomNav).selectedItemId = R.id.navRules
+        }
         setupSyncCode()
         setupIdentitySection()
         setupTodoSection()
@@ -422,6 +438,10 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnStopMonitor).setOnClickListener {
             stopService(Intent(this, UsageMonitorService::class.java))
             Toast.makeText(this, "Monitor stopped", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<Button>(R.id.btnOpenSetupGuide).setOnClickListener {
+            startActivity(Intent(this, OnboardingActivity::class.java)
+                .putExtra(OnboardingActivity.EXTRA_REVIEW_MODE, true))
         }
 
         refreshProtectionStatus()
@@ -996,6 +1016,7 @@ class MainActivity : AppCompatActivity() {
     // of scope for this pass.
 
     private fun setupIdentitySection() {
+        refreshGoogleAccountUi()
         findViewById<Button>(R.id.btnGoogleSignIn).setOnClickListener { btn ->
             val webClientId = getString(R.string.google_oauth_web_client_id)
             if (webClientId == "REPLACE_WITH_FIREBASE_WEB_CLIENT_ID") {
@@ -1015,6 +1036,7 @@ class MainActivity : AppCompatActivity() {
                             btn.isEnabled = true
                             if (linkResult.success) {
                                 Toast.makeText(this, "Signed in with Google", Toast.LENGTH_SHORT).show()
+                                refreshGoogleAccountUi()
                                 refreshMyFriendCode()
                             } else {
                                 Toast.makeText(this, linkResult.error ?: "Sign-in failed", Toast.LENGTH_LONG).show()
@@ -1028,6 +1050,28 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
+        }
+
+        findViewById<Button>(R.id.btnGoogleSignOut).setOnClickListener {
+            val webClientId = getString(R.string.google_oauth_web_client_id)
+            AlertDialog.Builder(this)
+                .setTitle("Sign out of Google?")
+                .setMessage("Your rules and usage stay on this phone. You will be signed out of Google and friends features until you sign in again.")
+                .setPositiveButton("Sign out") { _, _ ->
+                    com.focuslock.data.GoogleAuthClient.signOut(this, webClientId) { result ->
+                        postToUi {
+                            result.onSuccess {
+                                FocusPolicyClient.onAuthenticationChanged()
+                                refreshGoogleAccountUi()
+                                Toast.makeText(this, "Signed out of Google", Toast.LENGTH_SHORT).show()
+                            }.onFailure { error ->
+                                Toast.makeText(this, "Could not sign out: ${error.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
         }
 
         findViewById<Button>(R.id.btnSendFriendRequest).setOnClickListener { btn ->
@@ -1077,6 +1121,24 @@ class MainActivity : AppCompatActivity() {
     // Plumbing-not-polish, matching the friend-leaderboard list above: a
     // button to create a challenge (type + accepted friends + day count) and
     // a flat list of active challenges showing each participant's progress.
+
+    private fun refreshGoogleAccountUi() {
+        val user = FirebaseAuth.getInstance().currentUser
+        val signedIn = user != null && !user.isAnonymous
+        val signIn = findViewById<Button>(R.id.btnGoogleSignIn)
+        val signOut = findViewById<Button>(R.id.btnGoogleSignOut)
+        val account = findViewById<TextView>(R.id.txtGoogleAccount)
+        if (signedIn) {
+            val label = user?.email ?: user?.displayName ?: "Google account connected"
+            account.text = "Signed in as $label"
+            signIn.visibility = View.GONE
+            signOut.visibility = View.VISIBLE
+        } else {
+            account.text = "Not signed in. Your rules still work without Google."
+            signIn.visibility = View.VISIBLE
+            signOut.visibility = View.GONE
+        }
+    }
 
     private fun showStartChallengeDialog() {
         Thread {
@@ -2048,22 +2110,50 @@ class MainActivity : AppCompatActivity() {
     // Read-only diagnostics: helps the user find their modded YouTube client's
     // real package name once detection has learned it (see learnedAliases()).
     private fun refreshReelDetection() {
-        val statusLines = BlockableSurface.entries.joinToString("\n") { surface ->
+        val statusLines = BlockableSurface.entries.joinToString("\n\n") { surface ->
             val status = SurfaceBlocker.statusFor(surface)
-            "${surface.wireKey}: mode=${status.mode.wire} count=${status.count} limit=${status.limit} blocked=${status.blocked}"
+            val name = when (surface) {
+                BlockableSurface.INSTAGRAM_REELS -> "Instagram Reels"
+                BlockableSurface.YOUTUBE_SHORTS -> "YouTube Shorts"
+            }
+            val action = when (status.mode) {
+                SurfaceMode.OFF -> "Not blocking"
+                SurfaceMode.QUOTA -> "Blocks after ${status.limit.takeIf { it > 0 } ?: 0} today"
+                SurfaceMode.ONE_AT_A_TIME -> "Lets you view one at a time"
+                SurfaceMode.BLOCK -> "Blocked"
+            }
+            val detection = status.lastDetection?.let { seen ->
+                val elapsedSeconds = ((System.currentTimeMillis() - seen.atMs) / 1000).coerceAtLeast(0)
+                val whenSeen = when {
+                    elapsedSeconds < 60 -> "just now"
+                    elapsedSeconds < 3_600 -> "${elapsedSeconds / 60} min ago"
+                    else -> "${elapsedSeconds / 3_600} hr ago"
+                }
+                "Detected $whenSeen"
+            } ?: "Not detected yet"
+            "$name\n$action • ${status.count} watched today\n$detection"
         }
         val aliases = SurfaceBlocker.learnedAliases()
         val aliasLines = if (aliases.isEmpty()) {
-            "none yet"
+            "No extra YouTube-style apps recognised yet. Open a Short in the app you want to manage, swipe once, then return here."
         } else {
-            aliases.entries.joinToString("\n") { (pkg, surface) -> "$pkg -> ${surface.wireKey}" }
+            aliases.entries.joinToString("\n") { (pkg, surface) ->
+                val name = if (surface == BlockableSurface.YOUTUBE_SHORTS) "YouTube Shorts" else "Instagram Reels"
+                "$pkg is recognised as $name"
+            }
         }
         txtReelDetection.text = buildString {
             append(statusLines)
-            append("\n\nLearned aliases:\n")
+            append("\n\nOther supported apps\n")
             append(aliasLines)
-            append("\n\nOpen Reels/Shorts and swipe once, then return here.")
+            append("\n\nFocusLock only reacts to the full-screen Reels/Shorts viewer. Regular YouTube videos are left alone.")
         }
+    }
+
+    @Deprecated("Used by the Google Play services fallback picker")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        com.focuslock.data.GoogleAuthClient.handleActivityResult(requestCode, data)
     }
 
     private fun refreshDashboardData() {
@@ -2418,7 +2508,7 @@ class MainActivity : AppCompatActivity() {
                 postToUi {
                     layoutTodoList.removeAllViews()
                     layoutTodoList.addView(TextView(this).apply {
-                        text = "Cannot load task checklist (server offline)"
+                        text = "Tasks could not sync right now. FocusLock will retry automatically."
                         setTextColor(getColor(R.color.color_danger))
                         textSize = 13f
                     })

@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Dark Mode Theme Colors -->
-    <color name="bg_dark">#0A0E17</color>
-    <color name="surface_dark">#111827</color>
-    <color name="surface_dark_card">#1E293B</color>
+    <color name="bg_dark">#000000</color>
+    <color name="surface_dark">#050505</color>
+    <color name="surface_dark_card">#101010</color>
     <color name="color_primary">#6366F1</color> <!-- Indigo Accent -->
     <color name="color_primary_variant">#4F46E5</color>
     <color name="color_accent">#A78BFA</color> <!-- Violet Accent -->
     <color name="text_primary">#F8FAFC</color>
     <color name="text_secondary">#94A3B8</color>
-    <color name="border_color">#334155</color>
+    <color name="border_color">#292929</color>
     <color name="color_danger">#EF4444</color>
     <color name="color_warning">#F59E0B</color>
     <color name="color_shadow">#80000000</color>

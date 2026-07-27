@@ -1,6 +1,7 @@
 package com.focuslock.data
 
 import android.content.Context
+import android.provider.Settings
 import android.util.Log
 import com.google.android.gms.tasks.Tasks
 import com.google.firebase.FirebaseApp
@@ -29,6 +30,16 @@ object FocusPolicyClient {
     // sync, while different people get fully isolated data trees in Firestore.
     @Volatile
     private var userId = DEFAULT_USER_ID
+
+    /** True only for the first run after migrating the old shared default code. */
+    @Volatile var createdPrivateSyncCode: Boolean = false
+        private set
+
+    fun consumeCreatedPrivateSyncCode(): Boolean {
+        val created = createdPrivateSyncCode
+        createdPrivateSyncCode = false
+        return created
+    }
 
     // Normalize a sync code identically on Android and the Windows agent so the
     // same human input ("Dhruv 01") resolves to the same Firestore doc id.
@@ -81,19 +92,30 @@ object FocusPolicyClient {
     fun init(context: Context) {
         if (FirebaseApp.getApps(context).isEmpty()) {
             val options = FirebaseOptions.Builder()
-                .setApiKey("AIzaSyCwxWxVk7MMkpzkO39D7DTpbAyPrCmevvc")
-                .setApplicationId("1:22012836707:web:3d78f0e2a75849e2c63156")
+                .setApiKey("AIzaSyD2QFjbncvf0n78QlAziTga8V4uMxlcV90")
+                .setApplicationId("1:22012836707:android:128b1f0365601c01c63156")
                 .setProjectId("focusblock-e8376")
                 .build()
             FirebaseApp.initializeApp(context, options)
             Log.i(TAG, "Firebase initialized")
         }
 
-        // Resolve the active sync code (which Firestore user tree to read/write).
-        userId = sanitizeSyncId(
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getString(PREF_SYNC_ID, DEFAULT_USER_ID) ?: DEFAULT_USER_ID
-        )
+        // `user_default` was shared by every early install, so separate phones
+        // eventually hit the membership cap and all cloud reads failed. Give that
+        // legacy default a stable, private replacement on this device. A user who
+        // deliberately entered a different code is left untouched.
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val savedSyncId = prefs.getString(PREF_SYNC_ID, DEFAULT_USER_ID) ?: DEFAULT_USER_ID
+        if (savedSyncId == DEFAULT_USER_ID) {
+            val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+                .orEmpty().takeLast(10).ifBlank { java.util.UUID.randomUUID().toString().take(10) }
+            userId = sanitizeSyncId("focus-$androidId")
+            prefs.edit().putString(PREF_SYNC_ID, userId).apply()
+            createdPrivateSyncCode = true
+            Log.i(TAG, "Created private sync code '$userId' from legacy default")
+        } else {
+            userId = sanitizeSyncId(savedSyncId)
+        }
 
         // Enable offline persistence so Firestore caches data on-device.
         // This means evaluate() returns cached results even when offline,
@@ -107,6 +129,11 @@ object FocusPolicyClient {
         } catch (e: Exception) {
             Log.w(TAG, "Could not configure Firestore persistence (already set?)", e)
         }
+    }
+
+    /** Call after FirebaseAuth changes so a new anonymous session can join this sync tree. */
+    fun onAuthenticationChanged() {
+        membershipEnsuredFor = null
     }
 
     // Firestore rules require request.auth != null. We use anonymous auth: the
@@ -1283,7 +1310,12 @@ object FocusPolicyClient {
 
     /** Requests where the caller is the designated partner and a response is still needed. */
     fun getPendingApprovalRequestsForMe(): List<ApprovalRequest> {
-        val myUid = FirebaseAuth.getInstance().currentUser?.uid ?: return emptyList()
+        val user = FirebaseAuth.getInstance().currentUser ?: return emptyList()
+        // Partner approvals are identity features. Do not run an expensive
+        // collection-group query for an anonymous device that cannot sensibly
+        // act as somebody's accountability partner yet.
+        if (user.isAnonymous) return emptyList()
+        val myUid = user.uid
         val snap = Tasks.await(
             db.collectionGroup("requests")
                 .whereEqualTo("partnerUid", myUid)
