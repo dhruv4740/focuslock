@@ -42,7 +42,8 @@ class FocusAccessibilityService : AccessibilityService() {
         // monitor here rather than relying solely on BootCompletedReceiver — this is
         // the authoritative restart path after boot or a process kill.
         try {
-            startService(Intent(this, UsageMonitorService::class.java))
+            startService(Intent(this, UsageMonitorService::class.java)
+                .setAction(UsageMonitorService.ACTION_CHECK_PROTECTION))
         } catch (e: Exception) {
             // Best-effort; a later foreground-change event will retry via startService below.
         }
@@ -60,6 +61,15 @@ class FocusAccessibilityService : AccessibilityService() {
             UsageMonitorService.recordAccessibilityDisabled(this)
         } catch (e: Exception) {
             // Best-effort — must not block SurfaceBlocker.flushNow() below.
+        }
+        // Nudge the watchdog notification on immediately rather than waiting for
+        // the next poll — best-effort since the monitor service (or the whole
+        // process) may already be going down for the same reason this unbound.
+        try {
+            startService(Intent(this, UsageMonitorService::class.java)
+                .setAction(UsageMonitorService.ACTION_CHECK_PROTECTION))
+        } catch (e: Exception) {
+            // Best-effort.
         }
         SurfaceBlocker.flushNow()
         return super.onUnbind(intent)

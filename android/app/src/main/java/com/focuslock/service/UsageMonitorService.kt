@@ -34,7 +34,9 @@ class UsageMonitorService : Service() {
         private const val NOTIFICATION_ALERT_ID = 1102
         private const val NOTIFICATION_OVERLAY_PERM_ID = 1103
         private const val NOTIFICATION_LIMIT_REACHED_ID = 1104
+        private const val NOTIFICATION_WATCHDOG_ID = 1105
         private const val OVERLAY_COOLDOWN_MS = 3000L
+        private const val WATCHDOG_INTERVAL_MS = 15 * 60 * 1000L
 
         // ── Cold-start fail-closed + heartbeat-gap watchdog ──────────────────
         // Same "FocusLockPrefs" file FocusPolicyClient/MainActivity use.
@@ -58,6 +60,7 @@ class UsageMonitorService : Service() {
         const val ACTION_DISMISS_LOCK_OVERLAY = "com.focuslock.DISMISS_LOCK_OVERLAY"
         const val ACTION_FOREGROUND_CHANGED = "com.focuslock.ACTION_FOREGROUND_CHANGED"
         const val ACTION_POLICY_UPDATED = "com.focuslock.ACTION_POLICY_UPDATED"
+        const val ACTION_CHECK_PROTECTION = "com.focuslock.ACTION_CHECK_PROTECTION"
         const val EXTRA_PACKAGE_NAME = "package_name"
 
         // True while the monitor service is alive — lets the UI decide whether to
@@ -175,6 +178,8 @@ class UsageMonitorService : Service() {
     @Volatile private var lastSeenForegroundPackage: String? = null
     private val POLICY_REFRESH_THROTTLE_MS = 15 * 60 * 1000L
     private var localTimerRunnable: Runnable? = null
+    private var watchdogRunnable: Runnable? = null
+    private var protectionDegraded = false
     private var isLockOverlayActive = false
     private var isFrictionOverlayActive = false
 
@@ -204,6 +209,7 @@ class UsageMonitorService : Service() {
         startMonitorForeground()
         restorePersistedShadowState()
         checkHeartbeatGapOnStart()
+        startWatchdog()
 
         // One-time cold-start seed so the daily reel quota survives a process
         // restart mid-day instead of silently resetting to zero.
@@ -244,6 +250,12 @@ class UsageMonitorService : Service() {
             "com.focuslock.ACTION_FRICTION_OVERLAY_DISMISSED" -> {
                 isFrictionOverlayActive = false
             }
+            ACTION_CHECK_PROTECTION -> {
+                // Sent by FocusAccessibilityService right on connect/disconnect so
+                // the watchdog notification reacts immediately instead of waiting
+                // up to WATCHDOG_INTERVAL_MS for the next scheduled poll.
+                checkProtectionHealth()
+            }
         }
 
         isRunning.set(true)
@@ -261,6 +273,8 @@ class UsageMonitorService : Service() {
         closeRunnableByPackage.values.forEach { handler.removeCallbacks(it) }
         closeRunnableByPackage.clear()
         stopLocalTimer()
+        watchdogRunnable?.let { handler.removeCallbacks(it) }
+        watchdogRunnable = null
 
         dismissLockOverlay()
         dismissTimerOverlay()
@@ -715,6 +729,60 @@ class UsageMonitorService : Service() {
     /** Read accessor for the bounded gap history — surfaced in the UI later. */
     fun getEnforcementGapHistory(): List<EnforcementHealth.HeartbeatGap> = gapHistory
 
+    // Unconditional self-rescheduling check, independent of any target app being
+    // foreground — unlike localTimerRunnable, which only runs while a target app
+    // is open and is itself fed by the accessibility service. Without this, an
+    // accessibility revocation (routine on ColorOS/OnePlus after an app update)
+    // stopped everything with no signal anywhere in the app.
+    private fun startWatchdog() {
+        watchdogRunnable?.let { handler.removeCallbacks(it) }
+        val runnable = object : Runnable {
+            override fun run() {
+                checkProtectionHealth()
+                handler.postDelayed(this, WATCHDOG_INTERVAL_MS)
+            }
+        }
+        watchdogRunnable = runnable
+        checkProtectionHealth()
+        handler.postDelayed(runnable, WATCHDOG_INTERVAL_MS)
+    }
+
+    private fun checkProtectionHealth() {
+        val accessibilityOn = EnforcementChecks.readStatus(this).accessibility
+        if (!accessibilityOn && !protectionDegraded) {
+            protectionDegraded = true
+            notifyProtectionOff()
+            updateForegroundNotification(degraded = true)
+        } else if (accessibilityOn && protectionDegraded) {
+            protectionDegraded = false
+            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFICATION_WATCHDOG_ID)
+            updateForegroundNotification(degraded = false)
+        }
+    }
+
+    private fun notifyProtectionOff() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        }
+        val settingsIntent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val pendingIntent = android.app.PendingIntent.getActivity(
+            this, 0, settingsIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID_ALERTS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("⚠️ FocusLock protection is OFF")
+            .setContentText("Accessibility was turned off — tap to re-enable it. Limits and Reels blocking are not enforced right now.")
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setOngoing(true)
+            .setContentIntent(pendingIntent)
+            .build()
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+            .notify(NOTIFICATION_WATCHDOG_ID, notification)
+    }
+
     // ── Overlay helpers ───────────────────────────────────────────────────────
 
     private fun showLockOverlay(packageName: String) {
@@ -912,13 +980,7 @@ class UsageMonitorService : Service() {
     // dataSync fits since this service's job is syncing usage/policy state with
     // Firestore in the background.
     private fun startMonitorForeground() {
-        val notification = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID_MONITOR)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("FocusLock is monitoring app usage")
-            .setContentText("Enforcing your focus limits in the background.")
-            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
-            .setOngoing(true)
-            .build()
+        val notification = buildMonitorNotification(degraded = false)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 NOTIFICATION_MONITOR_ID,
@@ -928,5 +990,30 @@ class UsageMonitorService : Service() {
         } else {
             startForeground(NOTIFICATION_MONITOR_ID, notification)
         }
+    }
+
+    private fun buildMonitorNotification(degraded: Boolean) =
+        androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID_MONITOR)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(
+                if (degraded) "⚠️ Protection OFF — tap to fix" else "FocusLock is monitoring app usage"
+            )
+            .setContentText(
+                if (degraded) "Accessibility is disabled — limits and Reels blocking aren't enforced."
+                else "Enforcing your focus limits in the background."
+            )
+            .setPriority(
+                if (degraded) androidx.core.app.NotificationCompat.PRIORITY_HIGH
+                else androidx.core.app.NotificationCompat.PRIORITY_LOW
+            )
+            .setOngoing(true)
+            .build()
+
+    // Flips the always-visible foreground-service notification between its
+    // normal text and a degraded warning — this notification can't be swiped
+    // away, so it costs nothing to keep it honest about protection state.
+    private fun updateForegroundNotification(degraded: Boolean) {
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+            .notify(NOTIFICATION_MONITOR_ID, buildMonitorNotification(degraded))
     }
 }
