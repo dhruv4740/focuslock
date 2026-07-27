@@ -1053,12 +1053,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnGoogleSignOut).setOnClickListener {
-            val webClientId = getString(R.string.google_oauth_web_client_id)
             AlertDialog.Builder(this)
                 .setTitle("Sign out of Google?")
                 .setMessage("Your rules and usage stay on this phone. You will be signed out of Google and friends features until you sign in again.")
                 .setPositiveButton("Sign out") { _, _ ->
-                    com.focuslock.data.GoogleAuthClient.signOut(this, webClientId) { result ->
+                    com.focuslock.data.GoogleAuthClient.signOut(this) { result ->
                         postToUi {
                             result.onSuccess {
                                 FocusPolicyClient.onAuthenticationChanged()
@@ -2148,12 +2147,6 @@ class MainActivity : AppCompatActivity() {
             append(aliasLines)
             append("\n\nFocusLock only reacts to the full-screen Reels/Shorts viewer. Regular YouTube videos are left alone.")
         }
-    }
-
-    @Deprecated("Used by the Google Play services fallback picker")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        com.focuslock.data.GoogleAuthClient.handleActivityResult(requestCode, data)
     }
 
     private fun refreshDashboardData() {

@@ -9,7 +9,7 @@
     <color name="color_accent">#A78BFA</color> <!-- Violet Accent -->
     <color name="text_primary">#F8FAFC</color>
     <color name="text_secondary">#94A3B8</color>
-    <color name="border_color">#292929</color>
+    <color name="border_color">#3A3A3A</color>
     <color name="color_danger">#EF4444</color>
     <color name="color_warning">#F59E0B</color>
     <color name="color_shadow">#80000000</color>
