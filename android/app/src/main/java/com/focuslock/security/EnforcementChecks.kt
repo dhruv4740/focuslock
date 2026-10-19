@@ -6,6 +6,7 @@ import android.content.Context
 import android.os.Build
 import android.provider.Settings
 import com.focuslock.service.FocusAccessibilityService
+import com.focuslock.service.OnDemandAccessibility
 
 data class EnforcementStatus(
     val usageAccess: Boolean,
@@ -48,7 +49,11 @@ object EnforcementChecks {
         return mode == AppOpsManager.MODE_ALLOWED
     }
 
+    // A service that parked itself (OnDemandAccessibility) counts as enabled: the
+    // poller switches it back on, so enforcement isn't actually off. Requires the
+    // grant to still be held, otherwise nothing can switch it back on.
     private fun isAccessibilityEnabled(context: Context): Boolean {
+        if (OnDemandAccessibility.isParked(context) && OnDemandAccessibility.canManage(context)) return true
         val expectedService = ComponentName(context, FocusAccessibilityService::class.java).flattenToString()
         val enabled = Settings.Secure.getString(
             context.contentResolver,

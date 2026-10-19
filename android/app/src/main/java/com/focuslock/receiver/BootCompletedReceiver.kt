@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.focuslock.service.OnDemandAccessibility
 import com.focuslock.service.UsageMonitorService
 import com.focuslock.update.UpdateChecker
 
@@ -41,6 +42,10 @@ class BootCompletedReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start service on boot", e)
             }
+            // A service parked at shutdown/update isn't rebound by the OS; switch it
+            // back on so onServiceConnected restarts the monitor as usual. It parks
+            // again on the first non-managed app.
+            OnDemandAccessibility.enable(context)
         }
 
         if (intent?.action == Intent.ACTION_MY_PACKAGE_REPLACED) {

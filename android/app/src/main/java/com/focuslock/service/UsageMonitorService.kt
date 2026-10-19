@@ -37,6 +37,7 @@ class UsageMonitorService : Service() {
         private const val NOTIFICATION_WATCHDOG_ID = 1105
         private const val OVERLAY_COOLDOWN_MS = 3000L
         private const val WATCHDOG_INTERVAL_MS = 15 * 60 * 1000L
+        private const val FOREGROUND_POLL_MS = 1000L
 
         // ── Cold-start fail-closed + heartbeat-gap watchdog ──────────────────
         // Same "FocusLockPrefs" file FocusPolicyClient/MainActivity use.
@@ -179,6 +180,10 @@ class UsageMonitorService : Service() {
     private val POLICY_REFRESH_THROTTLE_MS = 15 * 60 * 1000L
     private var localTimerRunnable: Runnable? = null
     private var watchdogRunnable: Runnable? = null
+    private var foregroundPollRunnable: Runnable? = null
+    // Last foreground package the usage-stats poller saw, and the end of its last query window.
+    private var polledForegroundPackage: String? = null
+    private var lastPollQueryEndMs = 0L
     private var protectionDegraded = false
     private var isLockOverlayActive = false
     private var isFrictionOverlayActive = false
@@ -210,6 +215,7 @@ class UsageMonitorService : Service() {
         restorePersistedShadowState()
         checkHeartbeatGapOnStart()
         startWatchdog()
+        startForegroundPoller()
 
         // One-time cold-start seed so the daily reel quota survives a process
         // restart mid-day instead of silently resetting to zero.
@@ -275,6 +281,8 @@ class UsageMonitorService : Service() {
         stopLocalTimer()
         watchdogRunnable?.let { handler.removeCallbacks(it) }
         watchdogRunnable = null
+        foregroundPollRunnable?.let { handler.removeCallbacks(it) }
+        foregroundPollRunnable = null
 
         dismissLockOverlay()
         dismissTimerOverlay()
@@ -444,6 +452,7 @@ class UsageMonitorService : Service() {
                     appModes.putAll(resolved)
                     targetApps.clear()
                     targetApps.addAll(resolved.filterValues { it != com.focuslock.data.AppMode.OFF }.keys)
+                    OnDemandAccessibility.targetPackages = targetApps.toSet()
                     chunkTracker.configure(sessionMax, sessionBreak)
                     Log.d(TAG, "Policy refreshed: targetApps=$targetApps modes=$appModes chunk=$sessionMax/$sessionBreak")
                     // Replay the current foreground app: its forwards may have
@@ -747,6 +756,58 @@ class UsageMonitorService : Service() {
         handler.postDelayed(runnable, WATCHDOG_INTERVAL_MS)
     }
 
+    // While the accessibility service is parked (OnDemandAccessibility), this is the
+    // only foreground signal: it forwards app switches to handleForegroundChanged and
+    // re-enables the service when a managed app or reel surface comes to the front.
+    // While the service is connected its events stay authoritative and the poller
+    // only tracks. A no-op without the WRITE_SECURE_SETTINGS grant.
+    private fun startForegroundPoller() {
+        foregroundPollRunnable?.let { handler.removeCallbacks(it) }
+        val runnable = object : Runnable {
+            override fun run() {
+                try {
+                    pollForeground()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Foreground poll failed", e)
+                }
+                handler.postDelayed(this, FOREGROUND_POLL_MS)
+            }
+        }
+        foregroundPollRunnable = runnable
+        handler.post(runnable)
+    }
+
+    @Suppress("DEPRECATION") // MOVE_TO_FOREGROUND == ACTIVITY_RESUMED; the latter needs API 29
+    private fun pollForeground() {
+        if (!OnDemandAccessibility.canManage(this)) return
+        if (!(getSystemService(POWER_SERVICE) as android.os.PowerManager).isInteractive) return
+        val usm = getSystemService(USAGE_STATS_SERVICE) as android.app.usage.UsageStatsManager
+        val now = System.currentTimeMillis()
+        val from = if (lastPollQueryEndMs == 0L) now - 60_000L else lastPollQueryEndMs - 2_000L
+        val events = usm.queryEvents(from, now)
+        val event = android.app.usage.UsageEvents.Event()
+        var latest: String? = null
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            if (event.eventType == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                latest = event.packageName
+            }
+        }
+        lastPollQueryEndMs = now
+        val pkg = latest ?: polledForegroundPackage ?: return
+        val connected = FocusAccessibilityService.isConnected
+        if (pkg != polledForegroundPackage) {
+            polledForegroundPackage = pkg
+            if (!connected) {
+                handleForegroundChanged(pkg)
+                touchHeartbeat()
+            }
+        }
+        if (!connected && OnDemandAccessibility.needsService(pkg)) {
+            OnDemandAccessibility.enable(this)
+        }
+    }
+
     private fun checkProtectionHealth() {
         val accessibilityOn = EnforcementChecks.readStatus(this).accessibility
         if (!accessibilityOn && !protectionDegraded) {
@@ -976,16 +1037,17 @@ class UsageMonitorService : Service() {
 
     // Promotes this service to foreground so OEM background-kill policies are far
     // less likely to tear it down silently (accessibility-service rebind is the
-    // only other lifeline). Required on API 34+ to declare a foregroundServiceType;
-    // dataSync fits since this service's job is syncing usage/policy state with
-    // Firestore in the background.
+    // only other lifeline — and none while the service is parked). Required on API
+    // 34+ to declare a foregroundServiceType; specialUse because on Android 15
+    // dataSync is capped at 6 h/day and can't be started from BOOT_COMPLETED,
+    // while this service must run all day to re-enable the parked service.
     private fun startMonitorForeground() {
         val notification = buildMonitorNotification(degraded = false)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 NOTIFICATION_MONITOR_ID,
                 notification,
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
             )
         } else {
             startForeground(NOTIFICATION_MONITOR_ID, notification)

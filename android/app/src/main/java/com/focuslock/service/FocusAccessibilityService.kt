@@ -18,6 +18,8 @@ class FocusAccessibilityService : AccessibilityService() {
         // the service isn't connected so callers can fall back to a HOME intent.
         fun sendToHome(): Boolean =
             instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME) ?: false
+
+        val isConnected: Boolean get() = instance != null
     }
 
     // Package forwarded to UsageMonitorService by the last TYPE_WINDOW_STATE_CHANGED
@@ -29,6 +31,7 @@ class FocusAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        OnDemandAccessibility.setParked(this, false)
         SurfaceBlocker.reset()
         // Re-enable signal, paired with the disable recorded in onUnbind below —
         // closes out any open "enforcement stopped" entry with a real duration.
@@ -57,8 +60,9 @@ class FocusAccessibilityService : AccessibilityService() {
         // UsageMonitorService.closeAccessibilityDisabled for the boot/replace
         // cross-reference that downgrades the explainable cases. Wrapped
         // defensively so a failure here can never cost the reel-count flush.
+        // A self-park (see maybePark) is not an enforcement gap.
         try {
-            UsageMonitorService.recordAccessibilityDisabled(this)
+            if (!OnDemandAccessibility.isParked(this)) UsageMonitorService.recordAccessibilityDisabled(this)
         } catch (e: Exception) {
             // Best-effort — must not block SurfaceBlocker.flushNow() below.
         }
@@ -93,6 +97,17 @@ class FocusAccessibilityService : AccessibilityService() {
             }
         }
         SurfaceBlocker.onAccessibilityEvent(event, this)
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != null) maybePark(pkg)
+    }
+
+    // Leaving managed apps: turn the service off so banking apps opened next don't
+    // see it enabled. UsageMonitorService's poller turns it back on. Our own
+    // overlays and transient system windows (shade, keyboard) don't count as leaving.
+    private fun maybePark(pkg: String) {
+        if (pkg == packageName || OnDemandAccessibility.isTransientSystemPackage(pkg)) return
+        if (OnDemandAccessibility.needsService(pkg) || !OnDemandAccessibility.canManage(this)) return
+        OnDemandAccessibility.setParked(this, true)
+        disableSelf()
     }
 
     override fun onInterrupt() {
