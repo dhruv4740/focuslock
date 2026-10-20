@@ -83,6 +83,49 @@ shows what has been learned.
 `blockedSurfaces`, `reelDailyLimit`, or `reelCounts`, and its merge-write of
 `policy/global` round-trips them untouched.
 
+## On-demand accessibility
+
+`OnDemandAccessibility` keeps `FocusAccessibilityService` enabled only while a
+reel surface (`BlockableSurface` package, including learned aliases) is in the
+foreground. Reason: banking apps refuse to run with a third-party accessibility
+service enabled.
+
+- **Poller:** `UsageMonitorService` (a `specialUse` foreground service) polls
+  usage stats every second, forwards foreground changes to
+  `handleForegroundChanged` (so limits, friction and the lock overlay work with
+  the service parked), and re-enables the service when a reel surface returns.
+- **Park/enable:** the service calls `disableSelf` on leaving a reel surface and
+  records `a11y_parked`; the poller rewrites `ENABLED_ACCESSIBILITY_SERVICES`
+  to bring it back. Requires `WRITE_SECURE_SETTINGS`, granted once over adb
+  (`adb shell pm grant com.focuslock android.permission.WRITE_SECURE_SETTINGS`;
+  on OnePlus first enable Developer options → "Disable system optimisation").
+- **Watchdog:** while `a11y_parked` is set (and the permission is held), the
+  "accessibility disabled" tamper check is suppressed; an unparked disable is
+  still reported.
+- The lock overlay falls back to a HOME intent to leave the blocked app when
+  the service is parked.
+
+## Category budgets and overall cap
+
+Stored additively in `users/<id>/policy/global`:
+
+- `categories`: `{id: {name, apps: [pkg], dailyLimitMinutes, mode}}`. `0` = no
+  budget. Mode `limit` or `hard_block`.
+- `overallCap`: `{dailyLimitMinutes, mode, allowList: [pkg]}`. `0` = off. Mode
+  `friction_only` (default) or `hard_block`.
+- `usage_days/<date>.categoryMinutes.<id>`: per-category minutes, written next to
+  the unchanged total `usedMinutes` (managed apps only; cap-only apps post no
+  usage).
+
+`PolicyEngine.decide` is over-limit when the category budget or the global
+limit is exhausted (a hard budget wins). The cap is evaluated separately
+(`decideOverallCap`) from `UsageStatsManager` events, refreshed about every 20 s.
+`PolicyRatchet` treats a larger limit, lower mode rank, removed category/app, or
+cap allow-list addition (cap on) as loosening. Policy saves use
+`SetOptions.mergeFields` so a removed category is actually deleted.
+
+The Windows agent ignores these fields and round-trips them untouched.
+
 ## Offline / anti-bypass
 
 - Firestore offline persistence caches the last known policy/usage so an Android

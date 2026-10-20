@@ -73,6 +73,42 @@ starts with Windows (`npm run remove-startup` to undo).
   friction sequence (breathing, delay, intention, shake, reflection, stats,
   math) before access; a lock overlay appears once the limit is hit.
 
+## On-demand accessibility (Android, one-time setup)
+
+Banking apps refuse to run while a third-party accessibility service is
+enabled, so FocusLock keeps its accessibility service **off** except while a
+reel surface (Instagram Reels / YouTube Shorts) is in the foreground. Time
+limits, friction and the lock overlay do not need it; they run off a usage-stats
+poller. Setup, once per install:
+
+1. OnePlus/OxygenOS only: Developer options → turn on **Disable system
+   optimisation**.
+2. `adb shell pm grant com.focuslock android.permission.WRITE_SECURE_SETTINGS`
+
+Without the grant nothing parks and the service stays always-on (banking apps
+will then refuse to run).
+
+## Budgets (Android)
+
+Open **Rules → Budgets**.
+
+- **Category budgets:** a shared daily budget for a group of apps. Modes are
+  *Limit* (soft: friction, then lock) and *Hard block*. An app is over its limit
+  when its category budget **or** the global daily limit is used up. "Add Games"
+  detects installed games (`ApplicationInfo.category`); the app pickers list
+  games first. No categories = only the global limit applies, as before.
+- **Overall phone cap:** total foreground time across every app except the
+  allow-list, FocusLock, the launcher and system UI, read from usage stats.
+  Mode *Friction only* (default) sends every non-allow-listed app open through
+  the friction gate once over the cap; *Hard block* shows the lock overlay. The
+  allow-list defaults to the phone's dialer, SMS, contacts, camera, maps, clock
+  and settings apps; add banking apps with **Add apps**.
+- **Ratchet:** both follow the normal rules. Tightening applies immediately;
+  raising a limit, lowering a mode, removing a category or app, or adding to a
+  cap allow-list (while the cap is on) is delayed or needs partner approval.
+
+The Windows agent ignores the new fields (it does not read or modify them).
+
 ## Battery notes (Android)
 
 The monitor is event-driven: the Accessibility service only reacts to app
