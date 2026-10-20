@@ -808,7 +808,8 @@ class UsageMonitorService : Service() {
                 } catch (e: Exception) {
                     Log.w(TAG, "Foreground poll failed", e)
                 }
-                if (System.currentTimeMillis() - lastCapRefreshAt >= CAP_REFRESH_MS) refreshOverallCapUsage()
+                if (System.currentTimeMillis() - lastCapRefreshAt >= CAP_REFRESH_MS &&
+                    (getSystemService(POWER_SERVICE) as android.os.PowerManager).isInteractive) refreshOverallCapUsage()
                 handler.postDelayed(this, FOREGROUND_POLL_MS)
             }
         }

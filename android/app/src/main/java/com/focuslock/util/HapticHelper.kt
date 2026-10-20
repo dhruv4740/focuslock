@@ -41,6 +41,7 @@ object HapticHelper {
     }
 
     /** Returns true only if every requested composition primitive is available on this device. */
+    @android.annotation.SuppressLint("WrongConstant") // lint misreads the vararg as an unannotated constant
     private fun primitivesSupported(vibrator: Vibrator, vararg ids: Int): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
         return vibrator.arePrimitivesSupported(*ids).all { it }
