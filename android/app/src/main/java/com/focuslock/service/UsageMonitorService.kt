@@ -906,6 +906,10 @@ class UsageMonitorService : Service() {
             protectionDegraded = false
             (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFICATION_WATCHDOG_ID)
             updateForegroundNotification(degraded = false)
+        } else if (accessibilityOn) {
+            // protectionDegraded is in-memory only: an alert posted before a process
+            // restart would otherwise never be cleared.
+            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFICATION_WATCHDOG_ID)
         }
     }
 
