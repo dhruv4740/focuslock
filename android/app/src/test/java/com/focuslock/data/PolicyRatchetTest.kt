@@ -615,4 +615,74 @@ class PolicyRatchetTest {
     fun `isDue is true after the effective instant`() {
         assertTrue(PolicyRatchet.isDue(effectiveAtMs = 2_000L, nowMs = 2_001L))
     }
+
+    // ── Category budgets and overall cap ─────────────────────────────────────
+
+    private val gamesCat = AppCategory("Games", setOf("com.game"), 30, AppMode.LIMIT)
+
+    private fun snapWith(cats: Map<String, AppCategory> = emptyMap(), cap: OverallCap = OverallCap()) =
+        PolicySnapshot(categories = cats, overallCap = cap)
+
+    @Test
+    fun `raising a category limit loosens and is deferred`() {
+        val old = snapWith(mapOf("games" to gamesCat))
+        val new = snapWith(mapOf("games" to gamesCat.copy(dailyLimitMinutes = 60)))
+        assertEquals(ChangeDirection.LOOSEN, PolicyRatchet.classify(old, new))
+        val split = PolicyRatchet.split(old, new)
+        assertEquals(30, split.applyNow.categories.getValue("games").dailyLimitMinutes)
+        assertEquals(new, split.deferred)
+    }
+
+    @Test
+    fun `lowering a category limit tightens and applies now`() {
+        val old = snapWith(mapOf("games" to gamesCat))
+        val new = snapWith(mapOf("games" to gamesCat.copy(dailyLimitMinutes = 10)))
+        assertEquals(ChangeDirection.TIGHTEN, PolicyRatchet.classify(old, new))
+        assertEquals(new, PolicyRatchet.split(old, new).applyNow)
+    }
+
+    @Test
+    fun `removing a category or an app from it loosens`() {
+        val old = snapWith(mapOf("games" to gamesCat))
+        assertEquals(ChangeDirection.LOOSEN, PolicyRatchet.classify(old, snapWith()))
+        val fewerApps = snapWith(mapOf("games" to gamesCat.copy(apps = emptySet())))
+        assertEquals(ChangeDirection.LOOSEN, PolicyRatchet.classify(old, fewerApps))
+    }
+
+    @Test
+    fun `category budget set to unlimited loosens`() {
+        val old = snapWith(mapOf("games" to gamesCat))
+        val new = snapWith(mapOf("games" to gamesCat.copy(dailyLimitMinutes = 0)))
+        assertEquals(ChangeDirection.LOOSEN, PolicyRatchet.classify(old, new))
+    }
+
+    @Test
+    fun `adding a category applies now while a loosened sibling stays deferred`() {
+        val old = snapWith(mapOf("games" to gamesCat))
+        val social = AppCategory("Social", setOf("com.chat"), 20)
+        val new = snapWith(mapOf("games" to gamesCat.copy(dailyLimitMinutes = 90), "social" to social))
+        val applied = PolicyRatchet.split(old, new).applyNow
+        assertEquals(30, applied.categories.getValue("games").dailyLimitMinutes)
+        assertEquals(social, applied.categories["social"])
+    }
+
+    @Test
+    fun `loosening the overall cap is deferred and tightening applies now`() {
+        val old = snapWith(cap = OverallCap(120, AppMode.FRICTION_ONLY, setOf("com.bank")))
+        val looser = snapWith(cap = OverallCap(180, AppMode.FRICTION_ONLY, setOf("com.bank")))
+        assertEquals(ChangeDirection.LOOSEN, PolicyRatchet.classify(old, looser))
+        assertEquals(120, PolicyRatchet.split(old, looser).applyNow.overallCap.dailyLimitMinutes)
+        val stricter = snapWith(cap = OverallCap(60, AppMode.HARD_BLOCK, setOf("com.bank")))
+        assertEquals(ChangeDirection.TIGHTEN, PolicyRatchet.classify(old, stricter))
+        assertEquals(stricter, PolicyRatchet.split(old, stricter).applyNow)
+    }
+
+    @Test
+    fun `growing the cap allow-list loosens and shrinking it tightens`() {
+        val old = snapWith(cap = OverallCap(120, AppMode.FRICTION_ONLY, setOf("com.bank")))
+        val grown = snapWith(cap = OverallCap(120, AppMode.FRICTION_ONLY, setOf("com.bank", "com.game")))
+        assertEquals(ChangeDirection.LOOSEN, PolicyRatchet.classify(old, grown))
+        val shrunk = snapWith(cap = OverallCap(120, AppMode.FRICTION_ONLY, emptySet()))
+        assertEquals(ChangeDirection.TIGHTEN, PolicyRatchet.classify(old, shrunk))
+    }
 }

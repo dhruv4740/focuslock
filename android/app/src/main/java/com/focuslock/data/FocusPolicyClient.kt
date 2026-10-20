@@ -267,12 +267,16 @@ object FocusPolicyClient {
                 extensionMinutes = (policy["extensionMinutes"] as? Number)?.toInt() ?: 15,
                 hardBlockAfterLimit = policy["hardBlockAfterLimit"] as? Boolean ?: false,
                 blockWindows = blockWindows,
-                appModes = appModes
+                appModes = appModes,
+                categories = Budgets.categoriesFromWire(policy["categories"])
             ),
             usage = PolicyEngine.UsageInputs(
                 // Keep precision as Double throughout; avoid Int truncation
                 usedMinutes = usage["usedMinutes"] as? Double ?: 0.0,
-                extensionsUsedToday = (usage["extensionsUsedToday"] as? Number)?.toInt() ?: 0
+                extensionsUsedToday = (usage["extensionsUsedToday"] as? Number)?.toInt() ?: 0,
+                categoryMinutes = (usage["categoryMinutes"] as? Map<*, *>).orEmpty()
+                    .mapNotNull { (k, v) -> (k as? String)?.let { it to ((v as? Number)?.toDouble() ?: 0.0) } }
+                    .toMap()
             ),
             now = PolicyEngine.Now(
                 dayOfWeek = cal.get(java.util.Calendar.DAY_OF_WEEK) - 1, // 0=Sun
@@ -341,7 +345,8 @@ object FocusPolicyClient {
         target: String,
         startedAt: String,
         endedAt: String,
-        durationMinutes: Double
+        durationMinutes: Double,
+        categoryId: String? = null
     ) {
         // Key the usage day by LOCAL date so it matches evaluate()/getStats()
         // (both use LocalDate.now()) and the Windows agent (local getTodayString()).
@@ -378,6 +383,17 @@ object FocusPolicyClient {
                 SetOptions.merge()
             )
         )
+
+        // Per-category budget usage; the total above is still written for every
+        // app so usedMinutes keeps its meaning for the Windows agent.
+        if (categoryId != null) {
+            Tasks.await(
+                usageRef.set(
+                    mapOf("categoryMinutes" to mapOf(categoryId to FieldValue.increment(durationMinutes))),
+                    SetOptions.merge()
+                )
+            )
+        }
 
         // Hour-of-day bucket for the Insights heatmap. Keyed by the LOCAL hour
         // this usage was attributed to (same local-date convention as `date`
@@ -534,6 +550,8 @@ object FocusPolicyClient {
         // Additive fields (old docs parse fine with the defaults; the Windows
         // dashboard round-trips them untouched).
         val appModes: Map<String, String> = emptyMap(),
+        val categories: Map<String, AppCategory> = emptyMap(),
+        val overallCap: OverallCap = OverallCap(),
         val presets: Map<String, Map<String, Any>> = emptyMap(),
         val activePresetId: String = "",
         // Session chunking: after sessionMaxMinutes of cumulative managed-app
@@ -572,6 +590,8 @@ object FocusPolicyClient {
             reelDailyLimit = ((data["reelDailyLimit"] as? Map<String, Number>) ?: emptyMap())
                 .mapValues { it.value.toInt() },
             appModes = (data["appModes"] as? Map<String, String>) ?: emptyMap(),
+            categories = Budgets.categoriesFromWire(data["categories"]),
+            overallCap = Budgets.capFromWire(data["overallCap"]),
             presets = (data["presets"] as? Map<String, Map<String, Any>>) ?: emptyMap(),
             activePresetId = data["activePresetId"] as? String ?: "",
             sessionMaxMinutes = (data["sessionMaxMinutes"] as? Number)?.toInt() ?: 0,
@@ -708,6 +728,8 @@ object FocusPolicyClient {
             reelDailyLimit = policy.reelDailyLimit,
             sessionMaxMinutes = policy.sessionMaxMinutes,
             sessionBreakMinutes = policy.sessionBreakMinutes,
+            categories = policy.categories,
+            overallCap = policy.overallCap,
             frictionSteps = frictionPrefKeys.filterTo(mutableSetOf()) { prefs.getBoolean(it, true) },
             mathDifficulty = prefs.getString("math_difficulty", "easy") ?: "easy"
         )
@@ -725,7 +747,9 @@ object FocusPolicyClient {
         "blockedSurfaces" to snapshot.blockedSurfaces.mapValues { it.value.wire },
         "reelDailyLimit" to snapshot.reelDailyLimit,
         "sessionMaxMinutes" to snapshot.sessionMaxMinutes,
-        "sessionBreakMinutes" to snapshot.sessionBreakMinutes
+        "sessionBreakMinutes" to snapshot.sessionBreakMinutes,
+        "categories" to Budgets.categoriesToWire(snapshot.categories),
+        "overallCap" to Budgets.capToWire(snapshot.overallCap)
     )
 
     /** Writes the local-prefs half of [snapshot] (frictionSteps/mathDifficulty). */
@@ -776,6 +800,8 @@ object FocusPolicyClient {
             reelDailyLimit = reelDailyLimit,
             sessionMaxMinutes = (map["sessionMaxMinutes"] as? Number)?.toInt() ?: 0,
             sessionBreakMinutes = (map["sessionBreakMinutes"] as? Number)?.toInt() ?: 0,
+            categories = Budgets.categoriesFromWire(map["categories"]),
+            overallCap = Budgets.capFromWire(map["overallCap"]),
             frictionSteps = frictionSteps,
             mathDifficulty = map["mathDifficulty"] as? String ?: "easy"
         )

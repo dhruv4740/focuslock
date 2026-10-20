@@ -37,7 +37,9 @@ data class PolicySnapshot(
     val sessionMaxMinutes: Int = 0,
     val sessionBreakMinutes: Int = 0,
     val frictionSteps: Set<String> = emptySet(),
-    val mathDifficulty: String = "medium"
+    val mathDifficulty: String = "medium",
+    val categories: Map<String, AppCategory> = emptyMap(),
+    val overallCap: OverallCap = OverallCap()
 )
 
 object PolicyRatchet {
@@ -146,6 +148,50 @@ object PolicyRatchet {
             changes += FieldChange(
                 "appModes.$pkg", dir,
                 "$pkg: ${oldMode.label} → ${newMode.label}"
+            )
+        }
+
+        // categories: per-id like appModes. A category is loosened if it is
+        // removed, its limit grows (0 = none = loosest), its mode ranks lower, or
+        // an app leaves it; otherwise any difference tightens.
+        for (id in (old.categories.keys + new.categories.keys).sorted()) {
+            val o = old.categories[id]
+            val n = new.categories[id]
+            if (o == n) continue
+            val name = (n ?: o)!!.name
+            val dir = when {
+                o == null -> ChangeDirection.TIGHTEN
+                n == null -> ChangeDirection.LOOSEN
+                zeroIsInfinite(n.dailyLimitMinutes) > zeroIsInfinite(o.dailyLimitMinutes) ||
+                    appModeRank.getValue(n.mode) < appModeRank.getValue(o.mode) ||
+                    (o.apps - n.apps).isNotEmpty() -> ChangeDirection.LOOSEN
+                n.copy(name = o.name) == o -> ChangeDirection.NEUTRAL
+                else -> ChangeDirection.TIGHTEN
+            }
+            if (dir == ChangeDirection.NEUTRAL) continue
+            changes += FieldChange(
+                "categories.$id", dir,
+                when {
+                    o == null -> "$name category added"
+                    n == null -> "$name category removed"
+                    else -> "$name category: ${minutes(o.dailyLimitMinutes)} ${o.mode.label} → ${minutes(n.dailyLimitMinutes)} ${n.mode.label}" +
+                        if (o.apps != n.apps) ", apps ${o.apps.size} → ${n.apps.size}" else ""
+                }
+            )
+        }
+
+        // overallCap: loosened by a larger/disabled limit, a lower-ranked mode, or
+        // any app added to the allow-list (more apps exempt); removals tighten.
+        if (old.overallCap != new.overallCap) {
+            val o = old.overallCap
+            val n = new.overallCap
+            val loosens = zeroIsInfinite(n.dailyLimitMinutes) > zeroIsInfinite(o.dailyLimitMinutes) ||
+                appModeRank.getValue(n.mode) < appModeRank.getValue(o.mode) ||
+                (n.allowList - o.allowList).isNotEmpty()
+            changes += FieldChange(
+                "overallCap", if (loosens) ChangeDirection.LOOSEN else ChangeDirection.TIGHTEN,
+                "Phone cap ${minutes(o.dailyLimitMinutes)} ${o.mode.label} → ${minutes(n.dailyLimitMinutes)} ${n.mode.label}" +
+                    if (o.allowList != n.allowList) ", allow-list ${o.allowList.size} → ${n.allowList.size}" else ""
             )
         }
 
@@ -314,6 +360,23 @@ object PolicyRatchet {
                 new.appModes[pkg]?.let { merged[pkg] = it } ?: merged.remove(pkg)
             }
             applyNow = applyNow.copy(appModes = merged)
+        }
+
+        if ("overallCap" !in loosenedFields) applyNow = applyNow.copy(overallCap = new.overallCap)
+
+        // categories is per-id keyed (categories.<id>); like appModes, only the
+        // loosened ids stay at their old value, the rest apply now.
+        if ("categories" !in loosenedFields) {
+            applyNow = applyNow.copy(categories = new.categories)
+        } else {
+            val loosenedIds = loosened.filter { it.field.startsWith("categories.") }
+                .map { it.field.removePrefix("categories.") }.toSet()
+            val merged = applyNow.categories.toMutableMap()
+            for (id in old.categories.keys + new.categories.keys) {
+                if (id in loosenedIds) continue
+                new.categories[id]?.let { merged[id] = it } ?: merged.remove(id)
+            }
+            applyNow = applyNow.copy(categories = merged)
         }
 
         // targetApps: union of old and new is always at least as strict as

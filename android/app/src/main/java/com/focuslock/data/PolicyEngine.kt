@@ -12,6 +12,9 @@ package com.focuslock.data
  *  - "soft-limit":  over the daily limit with hardBlockAfterLimit OFF — allowed
  *                   in, but friction fires on every open and the badge turns red
  *  - "none":        within limits
+ *
+ * Budgets: the global daily limit and (if the app is in a category) that
+ * category's daily limit are both checked; either one exhausted counts as over.
  */
 object PolicyEngine {
 
@@ -24,10 +27,36 @@ object PolicyEngine {
         val blockWindows: List<BlockWindow>,
         // pkg → "off" | "friction_only" | "limit" | "hard_block"; consulted when a
         // packageName is passed to decide(). Absent entries behave as "limit".
-        val appModes: Map<String, String> = emptyMap()
+        val appModes: Map<String, String> = emptyMap(),
+        // id → category with its own daily budget. Empty = only the global limit.
+        val categories: Map<String, AppCategory> = emptyMap()
     )
 
-    data class UsageInputs(val usedMinutes: Double, val extensionsUsedToday: Int)
+    data class UsageInputs(
+        val usedMinutes: Double,
+        val extensionsUsedToday: Int,
+        // usage_days.categoryMinutes: category id → minutes used today.
+        val categoryMinutes: Map<String, Double> = emptyMap()
+    )
+
+    /** What the overall phone cap does to an app opening right now. */
+    enum class CapAction { NONE, FRICTION, LOCK }
+
+    /**
+     * Overall cap: [usedMinutes] is total foreground time across every app not on
+     * the allow-list (computed on-device from UsageStatsManager, so it is not part
+     * of [decide]). Callers exclude FocusLock itself, the launcher and system UI
+     * before summing and before asking about a package.
+     */
+    fun decideOverallCap(cap: OverallCap, usedMinutes: Double, packageName: String): CapAction = when {
+        cap.dailyLimitMinutes <= 0 || cap.mode == AppMode.OFF -> CapAction.NONE
+        packageName in cap.allowList -> CapAction.NONE
+        usedMinutes < cap.dailyLimitMinutes -> CapAction.NONE
+        cap.mode == AppMode.HARD_BLOCK -> CapAction.LOCK
+        else -> CapAction.FRICTION
+    }
+
+    private data class Budget(val limit: Int, val used: Double, val hard: Boolean, val overReason: String)
 
     /** [dayOfWeek] 0=Sunday..6=Saturday, matching the block-window wire format. */
     data class Now(val dayOfWeek: Int, val minuteOfDay: Int, val focusSessionActive: Boolean)
@@ -71,39 +100,68 @@ object PolicyEngine {
             )
         }
 
-        val overLimit = effectiveLimit > 0 && usage.usedMinutes >= effectiveLimit
-        if (!overLimit) {
+        // Global daily limit plus, when the app sits in a category with its own
+        // budget, that category's limit. An explicit per-app FRICTION_ONLY exempts
+        // the app from both. Extensions raise both limits.
+        val category = if (mode == AppMode.FRICTION_ONLY) null
+        else packageName?.let { Budgets.categoryOf(it, policy.categories) }
+        val extension = usage.extensionsUsedToday * policy.extensionMinutes
+        val budgets = buildList {
+            if (effectiveLimit > 0) add(Budget(effectiveLimit, usage.usedMinutes, hardBlockForApp, "daily-limit-reached"))
+            if (category != null && category.second.dailyLimitMinutes > 0 &&
+                (category.second.mode == AppMode.LIMIT || category.second.mode == AppMode.HARD_BLOCK)
+            ) {
+                val c = category.second
+                add(
+                    Budget(
+                        c.dailyLimitMinutes + extension,
+                        usage.categoryMinutes[category.first] ?: 0.0,
+                        c.mode == AppMode.HARD_BLOCK || hardBlockForApp,
+                        "category-limit-reached"
+                    )
+                )
+            }
+        }
+
+        val over = budgets.filter { it.used >= it.limit }
+        if (over.isEmpty()) {
+            // Report the tightest remaining budget so the local timer counts down
+            // against the constraint that will actually trip first.
+            val binding = budgets.minByOrNull { it.limit - it.used }
             return FocusPolicyClient.Decision(
                 allowNow = true,
                 action = "none",
                 reason = "within-limit",
-                effectiveLimit = effectiveLimit,
-                usedMinutes = usage.usedMinutes,
-                userUsedMinutes = usage.usedMinutes,
-                hardBlockAfterLimit = hardBlockForApp
+                effectiveLimit = binding?.limit ?: effectiveLimit,
+                usedMinutes = binding?.used ?: usage.usedMinutes,
+                userUsedMinutes = binding?.used ?: usage.usedMinutes,
+                hardBlockAfterLimit = binding?.hard ?: hardBlockForApp
             )
         }
 
-        // Over the daily limit: hardBlockAfterLimit decides lock vs. friction —
+        // Over a limit: hardBlockAfterLimit decides lock vs. friction —
         // matching the Windows agent, where OFF means "never hard-block on limit".
-        return if (hardBlockForApp) {
+        // Any exhausted budget that is hard wins over a soft one.
+        val hardBudget = over.firstOrNull { it.hard }
+        return if (hardBudget != null) {
             FocusPolicyClient.Decision(
                 allowNow = false,
                 action = "hard-block",
-                reason = "daily-limit-reached",
-                effectiveLimit = effectiveLimit,
-                usedMinutes = usage.usedMinutes,
-                userUsedMinutes = usage.usedMinutes,
+                reason = hardBudget.overReason,
+                effectiveLimit = hardBudget.limit,
+                usedMinutes = hardBudget.used,
+                userUsedMinutes = hardBudget.used,
                 hardBlockAfterLimit = true
             )
         } else {
+            val soft = over.first()
             FocusPolicyClient.Decision(
                 allowNow = true,
                 action = "soft-limit",
-                reason = "daily-limit-reached-soft",
-                effectiveLimit = effectiveLimit,
-                usedMinutes = usage.usedMinutes,
-                userUsedMinutes = usage.usedMinutes,
+                reason = "${soft.overReason}-soft",
+                effectiveLimit = soft.limit,
+                usedMinutes = soft.used,
+                userUsedMinutes = soft.used,
                 hardBlockAfterLimit = false
             )
         }
