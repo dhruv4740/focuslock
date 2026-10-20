@@ -23,10 +23,14 @@ import android.content.ComponentName
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
+import androidx.core.widget.doAfterTextChanged
+import com.focuslock.data.AppCategory
 import com.focuslock.data.AppMode
+import com.focuslock.data.Budgets
 import com.focuslock.data.ChangeDirection
 import com.focuslock.data.FocusPolicyClient
 import com.focuslock.data.FocusPolicyClient.PolicyData
+import com.focuslock.data.OverallCap
 import com.focuslock.data.PolicyRatchet
 import com.focuslock.data.PolicySnapshot
 import com.focuslock.data.PresetMapper
@@ -374,6 +378,7 @@ class MainActivity : AppCompatActivity() {
             chevron = findViewById(R.id.chevronBlockingRules),
             content = findViewById(R.id.layoutBlockingRulesContent)
         )
+        setupBudgetsEditor()
         setupCollapsible(
             header = findViewById(R.id.rowFrictionHeader),
             chevron = findViewById(R.id.chevronFriction),
@@ -871,6 +876,7 @@ class MainActivity : AppCompatActivity() {
                         .setText(if (policy.sessionBreakMinutes > 0) policy.sessionBreakMinutes.toString() else "")
                     renderTargetApps()
                     renderBlockWindows()
+                    loadBudgetsFromPolicy(policy)
                     spinnerInstagramReels.setSelection(spinnerIndexOf(policy.blockedSurfaces["instagram_reels"]))
                     spinnerYoutubeShorts.setSelection(spinnerIndexOf(policy.blockedSurfaces["youtube_shorts"]))
                     val igLimit = policy.reelDailyLimit["instagram_reels"] ?: 0
@@ -900,16 +906,23 @@ class MainActivity : AppCompatActivity() {
     // into the same currentPolicy.targetApps/appModes in-memory state the
     // manual "Add" button already uses — no new storage format.
 
-    private data class InstalledApp(val packageName: String, val label: String)
+    private data class InstalledApp(val packageName: String, val label: String, val isGame: Boolean)
 
     private fun listLaunchableApps(): List<InstalledApp> {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val resolveInfos = packageManager.queryIntentActivities(intent, 0)
         return resolveInfos
-            .map { InstalledApp(it.activityInfo.packageName, it.loadLabel(packageManager).toString()) }
+            .map {
+                InstalledApp(
+                    it.activityInfo.packageName,
+                    it.loadLabel(packageManager).toString(),
+                    it.activityInfo.applicationInfo.category == android.content.pm.ApplicationInfo.CATEGORY_GAME
+                )
+            }
             .filter { it.packageName != packageName }
             .distinctBy { it.packageName }
-            .sortedBy { it.label.lowercase() }
+            // Games first (ApplicationInfo.category), then alphabetical.
+            .sortedWith(compareByDescending<InstalledApp> { it.isGame }.thenBy { it.label.lowercase() })
     }
 
     private fun showInstalledAppsPicker() {
@@ -923,7 +936,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "No installed apps found", Toast.LENGTH_SHORT).show()
             return
         }
-        val labels = apps.map { "${it.label}\n${it.packageName}" }.toTypedArray()
+        val labels = apps.map { appPickerLabel(it) }.toTypedArray()
         val checked = apps.map { it.packageName in policy.targetApps }.toBooleanArray()
         AlertDialog.Builder(this)
             .setTitle("Pick apps to manage")
@@ -942,6 +955,295 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    // ── Budgets: category editor + overall phone cap (Rules → Budgets) ───────
+    //
+    // Edits live in editCategories / editCap; currentPolicy keeps the last-loaded
+    // server state so the ratchet compares against what is actually enforced, not
+    // against unsaved edits. Each Save writes only its own field through
+    // saveViaRatchet, which reloads the editor afterwards.
+
+    private var editCategories: Map<String, AppCategory> = emptyMap()
+    private var editCap = OverallCap()
+    private val categoryModeChoices = listOf(AppMode.LIMIT, AppMode.HARD_BLOCK)
+    private val capModeChoices = listOf(AppMode.FRICTION_ONLY, AppMode.HARD_BLOCK)
+
+    private fun setupBudgetsEditor() {
+        setupCollapsible(
+            header = findViewById(R.id.rowBudgetsHeader),
+            chevron = findViewById(R.id.chevronBudgets),
+            content = findViewById(R.id.layoutBudgetsContent)
+        )
+        val modeSpinner = findViewById<Spinner>(R.id.spinnerCapMode)
+        modeSpinner.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_item, capModeChoices.map { it.label }
+        ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        modeSpinner.backgroundTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.text_primary))
+        modeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                editCap = editCap.copy(mode = capModeChoices[position])
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        findViewById<EditText>(R.id.editCapLimit).doAfterTextChanged {
+            editCap = editCap.copy(dailyLimitMinutes = it?.toString()?.trim()?.toIntOrNull() ?: 0)
+        }
+
+        findViewById<Button>(R.id.btnAddGamesCategory).setOnClickListener {
+            val games = listLaunchableApps().filter { it.isGame }.map { it.packageName }.toSet()
+            val existing = editCategories[Budgets.GAMES_ID]
+            editCategories = editCategories + (Budgets.GAMES_ID to
+                (existing?.copy(apps = existing.apps + games) ?: AppCategory("Games", games, 60, AppMode.LIMIT)))
+            renderCategories()
+            Toast.makeText(this, "${games.size} game(s) detected — adjust, then Save Categories", Toast.LENGTH_LONG).show()
+        }
+        findViewById<Button>(R.id.btnAddCategory).setOnClickListener { promptNewCategory() }
+        findViewById<Button>(R.id.btnSaveCategories).setOnClickListener { btn ->
+            saveBudgetField(btn, findViewById(R.id.txtCategoriesSaved), "categories") { it.copy(categories = editCategories) }
+        }
+
+        findViewById<Button>(R.id.btnPickCapAllowList).setOnClickListener {
+            pickApps("Apps the cap never gates", editCap.allowList) { picked ->
+                editCap = editCap.copy(allowList = picked)
+                renderCapAllowList()
+            }
+        }
+        findViewById<Button>(R.id.btnResetCapAllowList).setOnClickListener {
+            editCap = editCap.copy(allowList = defaultCapAllowList())
+            renderCapAllowList()
+        }
+        findViewById<Button>(R.id.btnSaveCap).setOnClickListener { btn ->
+            saveBudgetField(btn, findViewById(R.id.txtCapSaved), "overallCap") { it.copy(overallCap = editCap) }
+        }
+    }
+
+    private fun loadBudgetsFromPolicy(policy: PolicyData) {
+        editCategories = policy.categories
+        // A cap that was never configured starts with the phone's default
+        // dialer/SMS/contacts/camera/maps/clock/settings apps pre-listed.
+        editCap = if (policy.overallCap == OverallCap()) OverallCap(allowList = defaultCapAllowList()) else policy.overallCap
+        findViewById<EditText>(R.id.editCapLimit)
+            .setText(if (editCap.dailyLimitMinutes > 0) editCap.dailyLimitMinutes.toString() else "")
+        findViewById<Spinner>(R.id.spinnerCapMode).setSelection(capModeChoices.indexOf(editCap.mode).coerceAtLeast(0))
+        renderCategories()
+        renderCapAllowList()
+    }
+
+    private fun saveBudgetField(btn: View, confirmationView: TextView, field: String, edit: (PolicyData) -> PolicyData) {
+        val policy = currentPolicy ?: return
+        val old = FocusPolicyClient.snapshotFrom(this, policy)
+        val new = FocusPolicyClient.snapshotFrom(this, edit(policy))
+        saveViaRatchet(btn, confirmationView, old, new, fieldKeys = setOf(field))
+    }
+
+    private fun promptNewCategory() {
+        val input = EditText(this).apply { hint = "Category name"; setPadding(48, 32, 48, 32) }
+        AlertDialog.Builder(this)
+            .setTitle("New category")
+            .setView(input)
+            .setPositiveButton("Create") { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isEmpty()) return@setPositiveButton
+                val id = Budgets.idFor(name)
+                if (id in editCategories) {
+                    Toast.makeText(this, "A category with that name already exists", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                editCategories = editCategories + (id to AppCategory(name, emptySet(), 60, AppMode.LIMIT))
+                renderCategories()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun updateCategory(id: String, change: (AppCategory) -> AppCategory) {
+        val cat = editCategories[id] ?: return
+        editCategories = editCategories + (id to change(cat))
+    }
+
+    private fun renderCategories() {
+        val container = findViewById<LinearLayout>(R.id.layoutCategories)
+        container.removeAllViews()
+        if (editCategories.isEmpty()) {
+            container.addView(TextView(this).apply {
+                text = "No categories — only the global daily limit applies"
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 13f
+            })
+            return
+        }
+        for ((id, cat) in editCategories.entries.sortedBy { it.key }) {
+            val box = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, 8, 0, 8)
+            }
+            val top = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            val name = TextView(this).apply {
+                text = cat.name
+                setTextColor(getColor(R.color.text_primary))
+                textSize = 14f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val limit = EditText(this).apply {
+                hint = "min"
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                setText(if (cat.dailyLimitMinutes > 0) cat.dailyLimitMinutes.toString() else "")
+                setTextColor(getColor(R.color.text_primary))
+                setHintTextColor(getColor(R.color.text_secondary))
+                background = getDrawable(R.drawable.edittext_background)
+                setPadding(16, 12, 16, 12)
+                layoutParams = LinearLayout.LayoutParams(
+                    resources.getDimensionPixelSize(R.dimen.min_touch_target) * 3 / 2,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                doAfterTextChanged { t ->
+                    updateCategory(id) { it.copy(dailyLimitMinutes = t?.toString()?.trim()?.toIntOrNull() ?: 0) }
+                }
+            }
+            val modeSpinner = Spinner(this).apply {
+                adapter = ArrayAdapter(
+                    this@MainActivity, android.R.layout.simple_spinner_item, categoryModeChoices.map { it.label }
+                ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+                backgroundTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.text_primary))
+                setSelection(categoryModeChoices.indexOf(cat.mode).coerceAtLeast(0))
+                onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id2: Long) {
+                        updateCategory(id) { it.copy(mode = categoryModeChoices[position]) }
+                    }
+                    override fun onNothingSelected(parent: AdapterView<*>?) {}
+                }
+            }
+            val del = Button(this).apply {
+                text = "✕"
+                textSize = 10f
+                contentDescription = "Remove ${cat.name}"
+                setTextColor(getColor(R.color.color_danger))
+                background = getDrawable(R.drawable.button_secondary)
+                val size = resources.getDimensionPixelSize(R.dimen.min_touch_target)
+                layoutParams = LinearLayout.LayoutParams(size, size).apply { marginStart = 8 }
+                setOnClickListener {
+                    editCategories = editCategories - id
+                    renderCategories()
+                }
+            }
+            top.addView(name)
+            top.addView(limit)
+            top.addView(modeSpinner)
+            top.addView(del)
+            val apps = Button(this).apply {
+                text = "${cat.apps.size} app(s) — edit"
+                background = getDrawable(R.drawable.button_secondary)
+                setTextColor(getColor(R.color.text_primary))
+                setOnClickListener {
+                    pickApps("Apps in ${cat.name}", cat.apps) { picked ->
+                        updateCategory(id) { it.copy(apps = picked) }
+                        renderCategories()
+                    }
+                }
+            }
+            box.addView(top)
+            box.addView(apps)
+            container.addView(box)
+        }
+    }
+
+    private fun renderCapAllowList() {
+        val container = findViewById<LinearLayout>(R.id.layoutCapAllowList)
+        container.removeAllViews()
+        if (editCap.allowList.isEmpty()) {
+            container.addView(TextView(this).apply {
+                text = "Nothing allow-listed — every app counts toward the cap"
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 13f
+            })
+            return
+        }
+        for (pkg in editCap.allowList.sortedBy { appLabel(it).lowercase() }) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, 4, 0, 4)
+            }
+            row.addView(TextView(this).apply {
+                text = appLabel(pkg)
+                setTextColor(getColor(R.color.text_primary))
+                textSize = 13f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            row.addView(Button(this).apply {
+                text = "✕"
+                textSize = 10f
+                contentDescription = "Remove ${appLabel(pkg)}"
+                setTextColor(getColor(R.color.color_danger))
+                background = getDrawable(R.drawable.button_secondary)
+                val size = resources.getDimensionPixelSize(R.dimen.min_touch_target)
+                layoutParams = LinearLayout.LayoutParams(size, size).apply { marginStart = 8 }
+                setOnClickListener {
+                    editCap = editCap.copy(allowList = editCap.allowList - pkg)
+                    renderCapAllowList()
+                }
+            })
+            container.addView(row)
+        }
+    }
+
+    private fun appLabel(pkg: String): String = try {
+        packageManager.getApplicationInfo(pkg, 0).loadLabel(packageManager).toString()
+    } catch (e: Exception) {
+        pkg
+    }
+
+    // Multi-select over launchable apps (games first). Packages already selected
+    // but not launchable/visible are kept as they are.
+    private fun pickApps(title: String, selected: Set<String>, onPicked: (Set<String>) -> Unit) {
+        val apps = listLaunchableApps()
+        val checked = apps.map { it.packageName in selected }.toBooleanArray()
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMultiChoiceItems(apps.map { appPickerLabel(it) }.toTypedArray(), checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("Done") { _, _ ->
+                val listed = apps.map { it.packageName }.toSet()
+                onPicked((selected - listed) + apps.filterIndexed { i, _ -> checked[i] }.map { it.packageName })
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun appPickerLabel(app: InstalledApp): String =
+        "${if (app.isGame) "🎮 " else ""}${app.label}\n${app.packageName}"
+
+    // Phone's own handlers for dial / SMS / contacts / camera / maps / clock /
+    // settings, resolved at runtime so OEM package names need no hard-coding.
+    private fun defaultCapAllowList(): Set<String> {
+        val intents = listOf(
+            Intent(Intent.ACTION_DIAL),
+            Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:")),
+            Intent(Intent.ACTION_VIEW).setDataAndType(
+                android.provider.ContactsContract.Contacts.CONTENT_URI,
+                android.provider.ContactsContract.Contacts.CONTENT_TYPE
+            ),
+            Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE),
+            Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0")),
+            Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS),
+            Intent(Settings.ACTION_SETTINGS)
+        )
+        return intents.mapNotNull { intent ->
+            val matches = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                .map { it.activityInfo.packageName }
+                .filter { it != packageName }
+            val default = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                ?.activityInfo?.packageName
+            default?.takeIf { it in matches }
+                ?: matches.firstOrNull {
+                    (packageManager.getApplicationInfo(it, 0).flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+                }
+        }.toSet()
     }
 
     // ── Sync Code ─────────────────────────────────────────────────────────────

@@ -872,6 +872,223 @@
             </LinearLayout>
         </LinearLayout>
 
+
+        <!-- Budgets Card (collapsible): category budgets + overall phone cap -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="@dimen/card_padding"
+            android:layout_marginTop="@dimen/space_lg"
+            android:layout_marginBottom="@dimen/space_lg">
+
+            <LinearLayout
+                android:id="@+id/rowBudgetsHeader"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="Budgets, tap to expand or collapse">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="BUDGETS"
+                    android:textAppearance="@style/TextAppearance.FocusLock.Eyebrow"/>
+
+                <TextView
+                    android:id="@+id/chevronBudgets"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="▸"
+                    android:importantForAccessibility="no"
+                    android:textAppearance="@style/TextAppearance.FocusLock.Label.Large"/>
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Shared time budgets per category (e.g. Games) and one cap for the whole phone. Tap to expand."
+                android:layout_marginTop="2dp"
+                android:textAppearance="@style/TextAppearance.FocusLock.Caption"/>
+
+            <LinearLayout
+                android:id="@+id/layoutBudgetsContent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="@dimen/space_md">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Categories"
+                    android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="An app is over its limit when its category budget or the global daily limit runs out. Minutes; 0 = no budget."
+                    android:layout_marginTop="2dp"
+                    android:textAppearance="@style/TextAppearance.FocusLock.Caption"/>
+
+                <LinearLayout
+                    android:id="@+id/layoutCategories"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginTop="@dimen/space_sm" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="@dimen/space_sm">
+
+                    <Button
+                        android:id="@+id/btnAddGamesCategory"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Add Games"
+                        android:background="@drawable/button_secondary"
+                        android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+
+                    <Button
+                        android:id="@+id/btnAddCategory"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="New category"
+                        android:background="@drawable/button_secondary"
+                        android:layout_marginStart="@dimen/space_sm"
+                        android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/btnSaveCategories"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Save Categories"
+                    android:background="@drawable/button_primary"
+                    android:textColor="@color/text_primary"
+                    android:layout_marginTop="@dimen/space_md" />
+
+                <TextView
+                    android:id="@+id/txtCategoriesSaved"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="✓ Categories saved"
+                    android:layout_marginTop="6dp"
+                    android:visibility="gone"
+                    android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Accent"/>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/text_secondary"
+                    android:alpha="0.2"
+                    android:layout_marginTop="@dimen/space_lg"
+                    android:layout_marginBottom="@dimen/space_lg" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Overall phone cap"
+                    android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Total screen time across every app except the allow-list, FocusLock, the launcher and system UI. Add banking apps to the allow-list so they never get gated."
+                    android:layout_marginTop="2dp"
+                    android:textAppearance="@style/TextAppearance.FocusLock.Caption"/>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="@dimen/space_sm">
+
+                    <EditText
+                        android:id="@+id/editCapLimit"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:hint="Daily cap (min, 0 = off)"
+                        android:inputType="number"
+                        android:background="@drawable/edittext_background"
+                        android:textColor="@color/text_primary"
+                        android:textColorHint="@color/text_secondary"
+                        android:padding="12dp" />
+
+                    <Spinner
+                        android:id="@+id/spinnerCapMode"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/space_sm" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Allow-list (never counted, never gated)"
+                    android:layout_marginTop="@dimen/space_md"
+                    android:textAppearance="@style/TextAppearance.FocusLock.Caption"/>
+
+                <LinearLayout
+                    android:id="@+id/layoutCapAllowList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginTop="@dimen/space_sm" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="@dimen/space_sm">
+
+                    <Button
+                        android:id="@+id/btnPickCapAllowList"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Add apps"
+                        android:background="@drawable/button_secondary"
+                        android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+
+                    <Button
+                        android:id="@+id/btnResetCapAllowList"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Reset to defaults"
+                        android:background="@drawable/button_secondary"
+                        android:layout_marginStart="@dimen/space_sm"
+                        android:textAppearance="@style/TextAppearance.FocusLock.Label"/>
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/btnSaveCap"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Save Cap"
+                    android:background="@drawable/button_primary"
+                    android:textColor="@color/text_primary"
+                    android:layout_marginTop="@dimen/space_md" />
+
+                <TextView
+                    android:id="@+id/txtCapSaved"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="✓ Cap saved"
+                    android:layout_marginTop="6dp"
+                    android:visibility="gone"
+                    android:textAppearance="@style/TextAppearance.FocusLock.BodySmall.Accent"/>
+            </LinearLayout>
+        </LinearLayout>
     </LinearLayout>
     </ScrollView>
 

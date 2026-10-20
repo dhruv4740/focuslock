@@ -685,4 +685,12 @@ class PolicyRatchetTest {
         val shrunk = snapWith(cap = OverallCap(120, AppMode.FRICTION_ONLY, emptySet()))
         assertEquals(ChangeDirection.TIGHTEN, PolicyRatchet.classify(old, shrunk))
     }
+
+    @Test
+    fun `turning the cap on with an allow-list tightens`() {
+        val old = snapWith()
+        val new = snapWith(cap = OverallCap(120, AppMode.FRICTION_ONLY, setOf("com.bank")))
+        assertEquals(ChangeDirection.TIGHTEN, PolicyRatchet.classify(old, new))
+        assertEquals(new, PolicyRatchet.split(old, new).applyNow)
+    }
 }

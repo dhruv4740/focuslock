@@ -181,13 +181,14 @@ object PolicyRatchet {
         }
 
         // overallCap: loosened by a larger/disabled limit, a lower-ranked mode, or
-        // any app added to the allow-list (more apps exempt); removals tighten.
+        // any app added to the allow-list while the cap is on (more apps exempt; an off
+        // cap exempts nothing yet, so first-time setup applies at once); removals tighten.
         if (old.overallCap != new.overallCap) {
             val o = old.overallCap
             val n = new.overallCap
             val loosens = zeroIsInfinite(n.dailyLimitMinutes) > zeroIsInfinite(o.dailyLimitMinutes) ||
                 appModeRank.getValue(n.mode) < appModeRank.getValue(o.mode) ||
-                (n.allowList - o.allowList).isNotEmpty()
+                (o.dailyLimitMinutes > 0 && (n.allowList - o.allowList).isNotEmpty())
             changes += FieldChange(
                 "overallCap", if (loosens) ChangeDirection.LOOSEN else ChangeDirection.TIGHTEN,
                 "Phone cap ${minutes(o.dailyLimitMinutes)} ${o.mode.label} → ${minutes(n.dailyLimitMinutes)} ${n.mode.label}" +

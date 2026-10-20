@@ -609,9 +609,12 @@ object FocusPolicyClient {
      */
     fun updatePolicyFields(fields: Map<String, Any>) {
         if (fields.isEmpty()) return
+        // mergeFields replaces each named top-level field wholesale. A plain merge
+        // would deep-merge map fields, so a category removed in the editor would
+        // survive in Firestore and come back on the next load.
         Tasks.await(
             db.collection("users").document(userId)
-                .collection("policy").document("global").set(fields, SetOptions.merge())
+                .collection("policy").document("global").set(fields, SetOptions.mergeFields(fields.keys.toList()))
         )
     }
 
