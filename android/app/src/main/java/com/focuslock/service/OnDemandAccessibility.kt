@@ -10,8 +10,8 @@ import com.focuslock.surface.BlockableSurface
 import com.focuslock.surface.SurfaceBlocker
 
 /**
- * Keeps FocusAccessibilityService enabled only while a managed app or a reel
- * surface is in the foreground. Banking apps refuse to run while any third-party
+ * Keeps FocusAccessibilityService enabled only while a reel surface is in the
+ * foreground. Banking apps refuse to run while any third-party
  * accessibility service is enabled, so the service parks itself (disableSelf) on
  * leaving those apps and UsageMonitorService's usage-stats poller switches it back
  * on when one returns.
@@ -30,8 +30,6 @@ object OnDemandAccessibility {
     // A usage-stats read just after parking can still report the app being left.
     private const val PARK_SETTLE_MS = 1500L
 
-    // Managed targets from the last policy refresh (written by UsageMonitorService).
-    @Volatile var targetPackages: Set<String> = emptySet()
     @Volatile private var lastEnableAtMs = 0L
     @Volatile private var parkedAtMs = 0L
 
@@ -39,8 +37,11 @@ object OnDemandAccessibility {
         context.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) ==
             PackageManager.PERMISSION_GRANTED
 
+    // Only reel surfaces need the accessibility service (they are detected from the
+    // view tree). Time limits, friction and the lock overlay run off the usage-stats
+    // poller in UsageMonitorService, so plain managed apps no longer keep it on.
     fun needsService(pkg: String): Boolean =
-        pkg in targetPackages || BlockableSurface.byPackage(pkg, SurfaceBlocker.learnedAliases()) != null
+        BlockableSurface.byPackage(pkg, SurfaceBlocker.learnedAliases()) != null
 
     fun isTransientSystemPackage(pkg: String) =
         pkg == "android" ||
