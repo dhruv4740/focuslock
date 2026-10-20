@@ -13,7 +13,12 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import com.focuslock.R
+import com.focuslock.data.AppCategory
+import com.focuslock.data.Budgets
 import com.focuslock.data.FocusPolicyClient
+import com.focuslock.data.OverallCap
+import com.focuslock.data.OverallCapUsage
+import com.focuslock.data.PolicyEngine
 import com.focuslock.security.EnforcementChecks
 import com.focuslock.security.EnforcementHealth
 import com.focuslock.surface.SurfaceBlocker
@@ -38,6 +43,7 @@ class UsageMonitorService : Service() {
         private const val OVERLAY_COOLDOWN_MS = 3000L
         private const val WATCHDOG_INTERVAL_MS = 15 * 60 * 1000L
         private const val FOREGROUND_POLL_MS = 1000L
+        private const val CAP_REFRESH_MS = 20_000L
 
         // ── Cold-start fail-closed + heartbeat-gap watchdog ──────────────────
         // Same "FocusLockPrefs" file FocusPolicyClient/MainActivity use.
@@ -151,6 +157,14 @@ class UsageMonitorService : Service() {
     private fun modeFor(packageName: String): com.focuslock.data.AppMode =
         appModes[packageName] ?: com.focuslock.data.AppMode.OFF
 
+    // Category budgets (for tagging usage posts) and the overall phone cap, from the
+    // last policy refresh. capUsedMinutes is recomputed from UsageStatsManager.
+    @Volatile private var categories: Map<String, AppCategory> = emptyMap()
+    @Volatile private var overallCap = OverallCap()
+    @Volatile private var capUsedMinutes = 0.0
+    private var lastCapRefreshAt = 0L
+    private var launcherPackage: String? = null
+
     // Per-package tracking
     private val sessionStartByPackage = mutableMapOf<String, Long>()
     private val lastOverlayShownAt = mutableMapOf<String, Long>()
@@ -247,7 +261,7 @@ class UsageMonitorService : Service() {
                 val target = intent.getStringExtra(FrictionBarrierService.EXTRA_TARGET)
                 if (target != null) {
                     lastFrictionBypassTimeByPackage[target] = System.currentTimeMillis()
-                    evaluateAndLockIfNeeded(target)
+                    if (targetApps.contains(target)) evaluateAndLockIfNeeded(target)
                 }
             }
             "com.focuslock.ACTION_LOCK_OVERLAY_DISMISSED" -> {
@@ -330,12 +344,13 @@ class UsageMonitorService : Service() {
         // rebuilt it from step 1 — the breathing→…→type-sentence loop restart.
         // The overlay dismisses itself via its Exit/Proceed buttons, so there is
         // no need to react to transient windows here.
-        if ((isLockOverlayActive || isFrictionOverlayActive) && !targetApps.contains(packageName)) {
+        val managed = targetApps.contains(packageName) || capActionFor(packageName) != PolicyEngine.CapAction.NONE
+        if ((isLockOverlayActive || isFrictionOverlayActive) && !managed) {
             Log.d(TAG, "Ignoring '$packageName' while overlay barrier is active")
             return
         }
 
-        if (targetApps.contains(packageName)) {
+        if (managed) {
             if (currentForegroundTarget != packageName) {
                 currentForegroundTarget?.let { handleTargetAppClosed(it, System.currentTimeMillis()) }
                 handleTargetAppOpened(packageName, System.currentTimeMillis())
@@ -351,6 +366,17 @@ class UsageMonitorService : Service() {
         Log.d(TAG, "Target opened: $packageName")
         if (System.currentTimeMillis() - lastBreakClickedAt < 1500L) {
             Log.d(TAG, "Ignoring open — recent break click")
+            return
+        }
+
+        val capAction = capActionFor(packageName)
+        if (!targetApps.contains(packageName)) {
+            // Over the overall phone cap but not a managed app: no timers, session
+            // chunking or usage posts (the total pool stays managed-apps-only), just
+            // the friction gate or the lock.
+            currentForegroundTarget = packageName
+            if (capAction == PolicyEngine.CapAction.LOCK) showLockOverlay(packageName)
+            else showFrictionOverlay(packageName)
             return
         }
 
@@ -374,7 +400,9 @@ class UsageMonitorService : Service() {
         showTimerOverlay(packageName)
         scheduleChunkCap()
 
-        if (blockedTargets.contains(packageName)) {
+        if (capAction == PolicyEngine.CapAction.LOCK) {
+            showLockOverlay(packageName)
+        } else if (blockedTargets.contains(packageName)) {
             showLockOverlay(packageName)
             evaluateAndLockIfNeeded(packageName)
         } else {
@@ -384,7 +412,9 @@ class UsageMonitorService : Service() {
             // LIMIT-mode apps — every open costs the full friction gate. Other
             // modes keep the normal cooldown (FRICTION_ONLY has no limit at all).
             val softLimitFriction = isOverLimitSoft && modeFor(packageName) == com.focuslock.data.AppMode.LIMIT
-            if (softLimitFriction || now - lastBypass > FRICTION_COOLDOWN_MS) {
+            if (softLimitFriction || capAction == PolicyEngine.CapAction.FRICTION ||
+                now - lastBypass > FRICTION_COOLDOWN_MS
+            ) {
                 showFrictionOverlay(packageName)
             } else {
                 evaluateAndLockIfNeeded(packageName)
@@ -397,9 +427,11 @@ class UsageMonitorService : Service() {
         Log.d(TAG, "Target closed: $packageName — starting 5 s debounce")
         currentForegroundTarget = null
 
-        chunkTracker.onTargetClosed(System.currentTimeMillis())
-        chunkCapRunnable?.let { handler.removeCallbacks(it) }
-        chunkCapRunnable = null
+        if (targetApps.contains(packageName)) {
+            chunkTracker.onTargetClosed(System.currentTimeMillis())
+            chunkCapRunnable?.let { handler.removeCallbacks(it) }
+            chunkCapRunnable = null
+        }
 
         stopLocalTimer()
         dismissLockOverlay()
@@ -445,6 +477,7 @@ class UsageMonitorService : Service() {
                 val resolved = (docTargets + wireModes.keys).associateWith { pkg ->
                     com.focuslock.data.AppMode.fromWire(wireModes[pkg], pkg in docTargets)
                 }
+                val budgets = FocusPolicyClient.getPolicy()
                 val sessionMax = policyJson.optInt("sessionMaxMinutes", 0)
                 val sessionBreak = policyJson.optInt("sessionBreakMinutes", 0)
                 handler.post {
@@ -452,13 +485,15 @@ class UsageMonitorService : Service() {
                     appModes.putAll(resolved)
                     targetApps.clear()
                     targetApps.addAll(resolved.filterValues { it != com.focuslock.data.AppMode.OFF }.keys)
-                    OnDemandAccessibility.targetPackages = targetApps.toSet()
+                    categories = budgets.categories
+                    overallCap = budgets.overallCap
                     chunkTracker.configure(sessionMax, sessionBreak)
                     Log.d(TAG, "Policy refreshed: targetApps=$targetApps modes=$appModes chunk=$sessionMax/$sessionBreak")
                     // Replay the current foreground app: its forwards may have
                     // been deduped away while targetApps was still empty.
                     // Idempotent — a no-op if it's already the tracked target.
                     lastSeenForegroundPackage?.let { handleForegroundChanged(it) }
+                    refreshOverallCapUsage()
                 }
                 val surfacesJson = policyJson.optJSONObject("blockedSurfaces")
                 if (surfacesJson != null) {
@@ -632,7 +667,10 @@ class UsageMonitorService : Service() {
                     .atOffset(java.time.ZoneOffset.UTC).toString()
                 val endedAt = java.time.Instant.ofEpochMilli(endMs)
                     .atOffset(java.time.ZoneOffset.UTC).toString()
-                FocusPolicyClient.postEvent(packageName, startedAt, endedAt, durationMinutes)
+                FocusPolicyClient.postEvent(
+                    packageName, startedAt, endedAt, durationMinutes,
+                    categoryId = Budgets.categoryOf(packageName, categories)?.first
+                )
             } catch (e: Exception) {
                 Log.w(TAG, "postEvent failed", e)
             }
@@ -770,6 +808,7 @@ class UsageMonitorService : Service() {
                 } catch (e: Exception) {
                     Log.w(TAG, "Foreground poll failed", e)
                 }
+                if (System.currentTimeMillis() - lastCapRefreshAt >= CAP_REFRESH_MS) refreshOverallCapUsage()
                 handler.postDelayed(this, FOREGROUND_POLL_MS)
             }
         }
@@ -805,6 +844,55 @@ class UsageMonitorService : Service() {
         }
         if (!connected && OnDemandAccessibility.needsService(pkg)) {
             OnDemandAccessibility.enable(this)
+        }
+    }
+
+    // ── Overall phone cap ─────────────────────────────────────────────────────
+
+    // FocusLock, the launcher, system UI and keyboard/phone-style transient windows
+    // never count toward the cap and are never gated by it.
+    private fun isCapExempt(pkg: String): Boolean =
+        pkg == packageName || pkg == launcherPackage || isTransientSystemPackage(pkg)
+
+    private fun capActionFor(pkg: String): PolicyEngine.CapAction =
+        if (isCapExempt(pkg)) PolicyEngine.CapAction.NONE
+        else PolicyEngine.decideOverallCap(overallCap, capUsedMinutes, pkg)
+
+    // Sums today's foreground time from UsageStatsManager off the main thread, then
+    // replays the current foreground app if the cap state changed so crossing the
+    // cap mid-session gates the app that is already open.
+    private fun refreshOverallCapUsage() {
+        lastCapRefreshAt = System.currentTimeMillis()
+        if (overallCap.dailyLimitMinutes <= 0 || overallCap.mode == com.focuslock.data.AppMode.OFF) {
+            capUsedMinutes = 0.0
+            return
+        }
+        networkExecutor.submit {
+            try {
+                if (launcherPackage == null) {
+                    launcherPackage = packageManager.resolveActivity(
+                        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0
+                    )?.activityInfo?.packageName
+                }
+                val now = System.currentTimeMillis()
+                val dayStart = LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault())
+                    .toInstant().toEpochMilli()
+                val usm = getSystemService(USAGE_STATS_SERVICE) as android.app.usage.UsageStatsManager
+                val raw = usm.queryEvents(dayStart, now)
+                val event = android.app.usage.UsageEvents.Event()
+                val events = mutableListOf<OverallCapUsage.Event>()
+                while (raw.hasNextEvent()) {
+                    raw.getNextEvent(event)
+                    events += OverallCapUsage.Event(event.packageName ?: "", event.eventType, event.timeStamp)
+                }
+                val used = OverallCapUsage.foregroundMinutes(events, now) { isCapExempt(it) || it in overallCap.allowList }
+                handler.post {
+                    capUsedMinutes = used
+                    lastSeenForegroundPackage?.let { handleForegroundChanged(it) }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Overall cap usage refresh failed", e)
+            }
         }
     }
 
