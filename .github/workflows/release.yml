@@ -22,6 +22,7 @@ jobs:
       - name: Write keystore.properties from secrets
         working-directory: android
         run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/focuslock.jks
           echo "storeFile=focuslock.jks" > keystore.properties
           echo "storePassword=${{ secrets.KEYSTORE_STORE_PASSWORD }}" >> keystore.properties
           echo "keyAlias=${{ secrets.KEYSTORE_KEY_ALIAS }}" >> keystore.properties

@@ -10,7 +10,6 @@ windows-agent/dist/
 local.properties
 android/**/build/
 *.jks
-!android/app/focuslock.jks
 *.keystore
 android/keystore.properties
 
